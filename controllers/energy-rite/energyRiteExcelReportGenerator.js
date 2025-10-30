@@ -86,6 +86,7 @@ class EnergyRiteExcelReportGenerator {
         start_date: startDate,
         end_date: endDate,
         cost_code: cost_code || 'ALL',
+        final_cost_code: cost_code,
         file_name: fileName,
         download_url: publicUrl,
         file_size: fileSize,
@@ -169,17 +170,23 @@ class EnergyRiteExcelReportGenerator {
     try {
       console.log(`📊 Getting operating sessions data for Excel report`);
       
-      // Get all sites for the cost code from vehicle lookup
+      // Get all sites for the cost code from vehicle lookup with hierarchical access
       let allSites = [];
       if (cost_code) {
+        console.log(`📊 Excel Report - Input cost code: ${cost_code}`);
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        console.log(`📊 Excel Report - Accessible cost codes: ${JSON.stringify(accessibleCostCodes)}`);
+        
         const { data: vehicleLookup, error: lookupError } = await supabase
           .from('energyrite_vehicle_lookup')
           .select('plate, cost_code')
-          .eq('cost_code', cost_code);
+          .in('cost_code', accessibleCostCodes);
         
         if (lookupError) throw new Error(`Lookup error: ${lookupError.message}`);
         allSites = vehicleLookup.map(v => v.plate);
-        console.log(`📋 Found ${allSites.length} sites for cost code ${cost_code}`);
+        console.log(`📊 Excel Report - Found ${allSites.length} sites for ${accessibleCostCodes.length} accessible cost codes`);
+        console.log(`📊 Excel Report - Sites: ${JSON.stringify(allSites)}`);
       }
       
       // Get completed operating sessions
@@ -235,7 +242,11 @@ class EnergyRiteExcelReportGenerator {
         }
         
         const site = siteGroups[session.branch];
-        site.sessions.push(session);
+        site.sessions.push({
+          ...session,
+          opening_percentage: parseFloat(session.opening_percentage || 0),
+          closing_percentage: parseFloat(session.closing_percentage || 0)
+        });
         site.total_sessions += 1;
         site.total_operating_hours += parseFloat(session.operating_hours || 0);
         site.total_fuel_usage += parseFloat(session.total_usage || 0);
@@ -275,50 +286,86 @@ class EnergyRiteExcelReportGenerator {
    */
   setupWorksheetLayout(worksheet) {
     worksheet.columns = [
-      { width: 4 },   // A: Expand button column
-      { width: 20 },  // B: Site
-      { width: 12 },  // C: Date  
-      { width: 15 },  // D: Operating Hours
-      { width: 18 },  // E: Opening Percentage
-      { width: 15 },  // F: Opening Fuel
-      { width: 18 },  // G: Closing Percentage
-      { width: 15 },  // H: Closing Fuel
+      { width: 5 },   // A: Expand button column
+      { width: 22 },  // B: Site
+      { width: 14 },  // C: Date  
+      { width: 16 },  // D: Operating Hours
+      { width: 16 },  // E: Opening Percentage
+      { width: 14 },  // F: Opening Fuel
+      { width: 16 },  // G: Closing Percentage
+      { width: 14 },  // H: Closing Fuel
       { width: 12 },  // I: Usage
       { width: 12 },  // J: Fill
-      { width: 15 },  // K: Efficiency
-      { width: 12 }   // L: Cost
+      { width: 14 },  // K: Efficiency
+      { width: 14 }   // L: Cost
     ];
     
-    worksheet.properties.defaultRowHeight = 20;
+    worksheet.properties.defaultRowHeight = 22;
   }
   
   /**
-   * Add report header with logo space and title
+   * Add report header with logo and title
    */
   addReportHeader(worksheet, periodName, reportType) {
+    const workbook = worksheet.workbook;
+    
     // Logo space (rows 1-6)
     worksheet.mergeCells('A1:L6');
     const logoCell = worksheet.getCell('A1');
-    logoCell.value = 'Energy Rite - Smart Energy Made Simple';
-    logoCell.font = { size: 16, bold: true, color: { argb: 'FF666666' } };
+    logoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
+    
+    // Try to add logo image
+    const fs = require('fs');
+    const path = require('path');
+    const logoPath = path.join(__dirname, '../../assets/logo.png');
+    
+    try {
+      if (fs.existsSync(logoPath)) {
+        const logoBuffer = fs.readFileSync(logoPath);
+        const imageId = workbook.addImage({
+          buffer: logoBuffer,
+          extension: 'png'
+        });
+        worksheet.addImage(imageId, {
+          tl: { col: 0.1, row: 0.1 },
+          br: { col: 5.9, row: 5.9 }
+        });
+      }
+    } catch (error) {
+      console.log('Logo not found, using text header');
+    }
+    
+    logoCell.value = '';
     logoCell.alignment = { horizontal: 'left', vertical: 'middle' };
     
-    // Title
+    // Title with professional styling
     worksheet.mergeCells('A7:L7');
     const titleCell = worksheet.getCell('A7');
     titleCell.value = 'FUEL REPORT SUMMARY';
-    titleCell.font = { size: 20, bold: true };
-    titleCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    titleCell.font = { size: 22, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF333333' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    titleCell.border = {
+      top: { style: 'medium', color: { argb: 'FF666666' } },
+      bottom: { style: 'medium', color: { argb: 'FF666666' } }
+    };
     
-    // Period
+    // Period with accent styling
     worksheet.mergeCells('A8:L8');
     const periodCell = worksheet.getCell('A8');
-    periodCell.value = periodName;
-    periodCell.font = { size: 14, bold: true };
-    periodCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    periodCell.value = `Report Period: ${periodName}`;
+    periodCell.font = { size: 14, bold: true, color: { argb: 'FF333333' } };
+    periodCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+    periodCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    periodCell.border = {
+      bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } }
+    };
     
-    // Empty row
-    worksheet.addRow([]);
+    // Empty row with subtle background
+    const emptyRow = worksheet.addRow([]);
+    emptyRow.eachCell((cell) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFAFAFA' } };
+    });
   }
   
   /**
@@ -327,7 +374,7 @@ class EnergyRiteExcelReportGenerator {
   async addExpandableReportData(worksheet, sessionsData, reportType) {
     // Header row
     const headerRow = worksheet.addRow([
-      '', // Expand button column
+      '+/-', // Expand button column
       'Site',
       'Date',
       'Operating Hours',
@@ -341,23 +388,27 @@ class EnergyRiteExcelReportGenerator {
       'Cost'
     ]);
     
-    // Style header row
+    // Style header row with professional gradient effect
     headerRow.eachCell((cell, colNumber) => {
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF333333' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2A2A2A' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
       cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
+        top: { style: 'medium', color: { argb: 'FF1A1A1A' } },
+        left: { style: 'thin', color: { argb: 'FF666666' } },
+        bottom: { style: 'medium', color: { argb: 'FF1A1A1A' } },
+        right: { style: 'thin', color: { argb: 'FF666666' } }
       };
     });
+    headerRow.height = 32;
     
-    // Add totals for each site
+    // Add data for each site with session breakdown
     for (const site of sessionsData.sites) {
+      const hasMultipleSessions = site.sessions.length > 1;
+      
+      // Main summary row
       const summaryRow = worksheet.addRow([
-        '',
+        site.sessions.length > 0 ? '▼' : '',
         site.branch,
         `${site.total_sessions} sessions`,
         this.formatDuration(site.total_operating_hours || 0),
@@ -368,23 +419,101 @@ class EnergyRiteExcelReportGenerator {
         `R${(site.total_cost || 0).toFixed(2)}`
       ]);
       
-      // Style row
+      // Style main row with alternating professional colors
       summaryRow.eachCell((cell, colNumber) => {
+        if (colNumber === 1) {
+          // Toggle button with accent
+          cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else {
+          cell.font = { bold: site.sessions.length > 0, color: { argb: 'FFFFFFFF' }, size: 10 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: site.sessions.length > 0 ? 'FF404040' : 'FF333333' } };
+          cell.alignment = { horizontal: colNumber === 2 ? 'left' : 'center', vertical: 'middle' };
+        }
         cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
+          top: { style: 'thin', color: { argb: 'FF666666' } },
+          left: { style: 'thin', color: { argb: 'FF666666' } },
+          bottom: { style: 'thin', color: { argb: 'FF666666' } },
+          right: { style: 'thin', color: { argb: 'FF666666' } }
         };
       });
+      if (site.sessions.length > 0) summaryRow.height = 26;
+      
+      // Add individual session rows for all sessions (single or multiple)
+      if (site.sessions.length > 0) {
+        for (const session of site.sessions) {
+          const sessionRow = worksheet.addRow([
+            '',
+            `  └ Session ${site.sessions.indexOf(session) + 1}`,
+            new Date(session.session_start_time).toLocaleDateString(),
+            this.formatDuration(session.operating_hours || 0),
+            `${(session.opening_percentage || 0).toFixed(0)}%`,
+            `${(session.opening_fuel || 0).toFixed(1)}L`,
+            `${(session.closing_percentage || 0).toFixed(0)}%`,
+            `${(session.closing_fuel || 0).toFixed(1)}L`,
+            `${(session.total_usage || 0).toFixed(2)}L`,
+            `${(session.total_fill || 0).toFixed(2)}L`,
+            `${(session.liter_usage_per_hour || 0).toFixed(2)}L/h`,
+            `R${(session.cost_for_usage || 0).toFixed(2)}`
+          ]);
+          
+          // Style session row with subtle indentation effect
+          sessionRow.eachCell((cell, colNumber) => {
+            if (colNumber === 1) {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
+            } else {
+              cell.font = { italic: true, size: 9, color: { argb: 'FFEEEEEE' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A4A4A' } };
+              cell.alignment = { horizontal: colNumber === 2 ? 'left' : 'center', vertical: 'middle' };
+            }
+            cell.border = {
+              left: { style: 'thin', color: { argb: 'FF666666' } },
+              right: { style: 'thin', color: { argb: 'FF666666' } },
+              bottom: { style: 'hair', color: { argb: 'FF888888' } }
+            };
+          });
+          sessionRow.height = 22;
+        }
+      }
     }
+    
+    // Apply grouping after all rows are added
+    const groupRanges = [];
+    let currentRow = headerRow.number + 1;
+    
+    for (const site of sessionsData.sites) {
+      const hasSessions = site.sessions.length > 0;
+      currentRow++; // Skip summary row
+      
+      if (hasSessions) {
+        const startRow = currentRow;
+        const endRow = currentRow + site.sessions.length - 1;
+        groupRanges.push({ start: startRow, end: endRow });
+        currentRow = endRow + 1;
+      }
+    }
+    
+    // Apply outline levels
+    groupRanges.forEach(range => {
+      for (let i = range.start; i <= range.end; i++) {
+        worksheet.getRow(i).outlineLevel = 1;
+      }
+    });
+    
+    // Enable outline view
+    worksheet.views = [{
+      state: 'normal',
+      showOutlineSymbols: true
+    }];
+    
     
     // Add totals summary
     worksheet.addRow([]);
     const totalRow = worksheet.addRow([
       '',
       `${reportType.toUpperCase()} TOTALS`,
-      '',
+      `${sessionsData.totalSessions} sessions`,
       this.formatDuration(sessionsData.totalOperatingHours),
       '', '', '', '',
       sessionsData.sites.reduce((sum, site) => sum + site.total_fuel_usage, 0).toFixed(2),
@@ -393,17 +522,19 @@ class EnergyRiteExcelReportGenerator {
       `R${sessionsData.sites.reduce((sum, site) => sum + site.total_cost, 0).toFixed(2)}`
     ]);
     
-    // Style totals row
+    // Style totals row with emphasis
     totalRow.eachCell((cell, colNumber) => {
-      cell.font = { bold: true, size: 12 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
+      cell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
+      cell.alignment = { horizontal: colNumber === 2 ? 'left' : 'center', vertical: 'middle' };
       cell.border = {
-        top: { style: 'thick' },
-        left: { style: 'thin' },
-        bottom: { style: 'thick' },
-        right: { style: 'thin' }
+        top: { style: 'thick', color: { argb: 'FF333333' } },
+        left: { style: 'thin', color: { argb: 'FF666666' } },
+        bottom: { style: 'thick', color: { argb: 'FF333333' } },
+        right: { style: 'thin', color: { argb: 'FF666666' } }
       };
     });
+    totalRow.height = 30;
   }
   
   /**
@@ -433,6 +564,7 @@ class EnergyRiteExcelReportGenerator {
   async storeReportRecord(reportData) {
     try {
       console.log(`💾 Storing report: ${reportData.report_type} for ${reportData.cost_code}`);
+      console.log(`📊 Excel Report - Final cost code: ${reportData.final_cost_code}`);
       
       const reportDate = reportData.start_date.toISOString().split('T')[0];
       

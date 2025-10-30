@@ -11,4 +11,10 @@ router.get('/peak-usage', energyRiteActivityReportController.getPeakUsageAnalysi
 // Get site comparison report
 router.get('/site-comparison', energyRiteActivityReportController.getSiteComparison);
 
+// Get comprehensive activity dashboard
+router.get('/dashboard', energyRiteActivityReportController.getActivityDashboard);
+
+// Take manual activity snapshot
+router.post('/snapshot', energyRiteActivityReportController.takeSnapshot);
+
 module.exports = router;

@@ -73,8 +73,11 @@ class EnergyRiteReportsController {
         .lte('session_date', endOfMonth)
         .eq('session_status', 'COMPLETED');
       
+      // Apply hierarchical cost code filtering if provided
       if (cost_code) {
-        monthlyQuery = monthlyQuery.eq('cost_code', cost_code);
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        monthlyQuery = monthlyQuery.in('cost_code', accessibleCostCodes);
       }
       
       const { data: monthlyData, error: monthlyError } = await monthlyQuery;
@@ -140,11 +143,18 @@ class EnergyRiteReportsController {
         }
       });
       
-      // Get all sites (from vehicle lookup and sessions)
-      const { data: vehicleLookup, error: lookupError } = await supabase
+      // Get vehicle lookup with hierarchical cost code filtering
+      let vehicleLookupQuery = supabase
         .from('energyrite_vehicle_lookup')
         .select('plate, cost_code');
         
+      if (cost_code) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        vehicleLookupQuery = vehicleLookupQuery.in('cost_code', accessibleCostCodes);
+      }
+      
+      const { data: vehicleLookup, error: lookupError } = await vehicleLookupQuery;
       if (lookupError) throw new Error(`Lookup error: ${lookupError.message}`);
       
       const allSites = new Set();
@@ -225,8 +235,11 @@ class EnergyRiteReportsController {
         .order('branch')
         .order('session_start_time');
       
+      // Apply hierarchical cost code filtering if provided
       if (cost_code) {
-        sessionsQuery = sessionsQuery.eq('cost_code', cost_code);
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
       }
       
       const { data: sessionsData, error: sessionsError } = await sessionsQuery;
@@ -264,6 +277,9 @@ class EnergyRiteReportsController {
             company: session.company,
             cost_code: session.cost_code,
             sessions: [],
+            session_count: 0,
+            has_multiple_sessions: false,
+            expandable: false,
             total_operating_hours: 0,
             total_fuel_usage: 0,
             total_fuel_filled: 0,
@@ -277,14 +293,18 @@ class EnergyRiteReportsController {
         
         const site = activitySummary[session.branch];
         const sessionInfo = {
+          id: session.id || `${session.branch}_${session.session_start_time}`,
           start_time: session.session_start_time,
           end_time: session.session_end_time,
           duration_hours: parseFloat(session.operating_hours || 0),
           opening_fuel: parseFloat(session.opening_fuel || 0),
+          opening_percentage: parseFloat(session.opening_percentage || 0),
           closing_fuel: parseFloat(session.closing_fuel || 0),
+          closing_percentage: parseFloat(session.closing_percentage || 0),
           fuel_usage: parseFloat(session.total_usage || 0),
           fuel_filled: parseFloat(session.total_fill || 0),
           cost: parseFloat(session.cost_for_usage || 0),
+          efficiency: parseFloat(session.liter_usage_per_hour || 0),
           status: session.session_status,
           notes: session.notes
         };
@@ -308,6 +328,15 @@ class EnergyRiteReportsController {
         if (!site.last_session_end || (session.session_end_time && session.session_end_time > site.last_session_end)) {
           site.last_session_end = session.session_end_time;
         }
+        
+        // Update session count
+        site.session_count = site.sessions.length;
+      });
+      
+      // Mark sites with multiple sessions as expandable
+      Object.values(activitySummary).forEach(site => {
+        site.has_multiple_sessions = site.session_count > 1;
+        site.expandable = site.has_multiple_sessions;
       });
       
       // Add fuel level snapshots from fuel data
@@ -601,8 +630,11 @@ class EnergyRiteReportsController {
         .lte('session_date', weekEnd.toISOString().split('T')[0])
         .eq('session_status', 'COMPLETED');
       
+      // Apply hierarchical cost code filtering if provided
       if (cost_code) {
-        weeklyQuery = weeklyQuery.eq('cost_code', cost_code);
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        weeklyQuery = weeklyQuery.in('cost_code', accessibleCostCodes);
       }
       
       const { data: weeklyData, error: weeklyError } = await weeklyQuery;
@@ -739,8 +771,11 @@ class EnergyRiteReportsController {
         .lte('session_date', endOfMonth)
         .eq('session_status', 'COMPLETED');
       
+      // Apply hierarchical cost code filtering if provided
       if (cost_code) {
-        monthlyQuery = monthlyQuery.eq('cost_code', cost_code);
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        monthlyQuery = monthlyQuery.in('cost_code', accessibleCostCodes);
       }
       
       const { data: monthlyData, error: monthlyError } = await monthlyQuery;

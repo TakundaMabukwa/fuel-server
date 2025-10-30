@@ -1,9 +1,10 @@
 const { supabase } = require('../../supabase-client');
+const activitySnapshots = require('../../helpers/activity-snapshots');
 
 class EnergyRiteActivityReportController {
 
   /**
-   * Get enhanced activity report focusing on peak usage, operating hours, and generator metrics
+   * Get enhanced activity report with time slot fuel usage breakdown
    */
   async getActivityReport(req, res) {
     try {
@@ -22,202 +23,168 @@ class EnergyRiteActivityReportController {
       const start = startDate || defaultStartDate.toISOString().split('T')[0];
       const end = endDate || defaultEndDate.toISOString().split('T')[0];
 
-      // Get all sites for cost code(s) if provided
-      let sitesForCostCode = [];
+      // Get all sites with cost codes
+      const { data: allVehicles } = await supabase
+        .from('energyrite_vehicle_lookup')
+        .select('plate, cost_code');
+      
+      const costCodeMap = {};
+      allVehicles?.forEach(v => {
+        costCodeMap[v.plate] = v.cost_code;
+      });
+
+      // Filter sites by cost code with hierarchical access
+      let sitesToInclude = Object.keys(costCodeMap);
       if (costCode || costCodes) {
-        let query = supabase
-          .from('energyrite_vehicle_lookup')
-          .select('plate, cost_code');
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        let accessibleCostCodes = [];
         
         if (costCodes) {
-          // Multiple cost codes (comma-separated)
           const codeArray = costCodes.split(',').map(c => c.trim());
-          query = query.in('cost_code', codeArray);
+          for (const code of codeArray) {
+            const accessible = await costCenterAccess.getAccessibleCostCenters(code);
+            accessibleCostCodes.push(...accessible);
+          }
         } else if (costCode) {
-          // Single cost code
-          query = query.eq('cost_code', costCode);
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(costCode);
         }
         
-        const { data: vehicleLookup } = await query;
-        sitesForCostCode = vehicleLookup?.map(v => v.plate) || [];
+        sitesToInclude = allVehicles
+          .filter(v => accessibleCostCodes.includes(v.cost_code))
+          .map(v => v.plate);
+      }
+      if (site) {
+        sitesToInclude = sitesToInclude.filter(s => s === site);
       }
 
-      // Build query for completed sessions
-      let query = supabase
+      // Get snapshots for time slot analysis
+      const { data: snapshots } = await supabase
+        .from('energy_rite_activity_snapshots')
+        .select('*')
+        .gte('snapshot_date', start)
+        .lte('snapshot_date', end)
+        .order('snapshot_time', { ascending: true });
+
+      // Initialize site reports
+      const siteReports = {};
+      sitesToInclude.forEach(siteName => {
+        siteReports[siteName] = {
+          generator: siteName,
+          cost_code: costCodeMap[siteName],
+          company: 'KFC',
+          morning_fuel: 0,
+          afternoon_fuel: 0,
+          evening_fuel: 0,
+          peak_time_slot: null,
+          peak_fuel_usage: 0,
+          total_fuel_usage: 0,
+          total_sessions: 0,
+          total_operating_hours: 0
+        };
+      });
+
+      // Process snapshots to calculate fuel usage by time slot
+      const timeSlotTotals = { morning: 0, afternoon: 0, evening: 0 };
+      
+      snapshots?.forEach(snapshot => {
+        const vehiclesData = snapshot.vehicles_data || [];
+        
+        vehiclesData.forEach(vehicle => {
+          const siteName = vehicle.branch || vehicle.plate; // Use branch as site name
+          const costCode = vehicle.cost_code;
+          
+          // Only process sites that are in our filtered list
+          if (!siteReports[siteName] && sitesToInclude.includes(siteName)) {
+            siteReports[siteName] = {
+              generator: siteName,
+              cost_code: costCode || costCodeMap[siteName],
+              company: vehicle.company || 'KFC',
+              morning_fuel: 0,
+              afternoon_fuel: 0,
+              evening_fuel: 0,
+              peak_time_slot: null,
+              peak_fuel_usage: 0,
+              total_fuel_usage: 0,
+              total_sessions: 0,
+              total_operating_hours: 0
+            };
+          }
+          
+          if (siteReports[siteName]) {
+            const fuelLevel = parseFloat(vehicle.fuel_level || 0);
+            const timeSlot = snapshot.time_slot;
+            
+            // Add fuel level to appropriate time slot
+            siteReports[siteName][`${timeSlot}_fuel`] += fuelLevel;
+            timeSlotTotals[timeSlot] += fuelLevel;
+          }
+        });
+      });
+
+      // Get session data for additional metrics
+      let sessionQuery = supabase
         .from('energy_rite_operating_sessions')
         .select('*')
         .gte('session_date', start)
         .lte('session_date', end)
         .eq('session_status', 'COMPLETED');
 
-      if (site) {
-        query = query.eq('branch', site);
-      } else if ((costCode || costCodes) && sitesForCostCode.length > 0) {
-        query = query.in('branch', sitesForCostCode);
+      if (sitesToInclude.length > 0) {
+        sessionQuery = sessionQuery.in('branch', sitesToInclude);
       }
 
-      const { data: sessions, error } = await query.order('session_start_time', { ascending: false });
+      const { data: sessions } = await sessionQuery;
 
-      if (error) throw new Error(`Database error: ${error.message}`);
-
-      // Initialize all sites with zero values
-      const siteReports = {};
-      if ((costCode || costCodes) && sitesForCostCode.length > 0) {
-        // Get cost code mapping for each site
-        const { data: vehicleLookup } = await supabase
-          .from('energyrite_vehicle_lookup')
-          .select('plate, cost_code')
-          .in('plate', sitesForCostCode);
-        
-        const costCodeMap = {};
-        vehicleLookup?.forEach(v => {
-          costCodeMap[v.plate] = v.cost_code;
-        });
-        
-        sitesForCostCode.forEach(siteName => {
-          siteReports[siteName] = {
-            generator: siteName,
-            cost_code: costCodeMap[siteName] || costCode,
-            company: 'KFC',
-            total_sessions: 0,
-            total_operating_hours: 0,
-            total_fuel_usage: 0,
-            total_fuel_fill: 0,
-            total_cost: 0,
-            peak_usage_amount: 0,
-            peak_usage_session: null,
-            longest_session_hours: 0,
-            longest_session: null,
-            sessions_by_hour: {},
-            daily_breakdown: []
-          };
-        });
-      }
-
-      // Process sessions
-      const hourlyUsage = {};
-      const dailyUsage = {};
-
-      sessions.forEach(session => {
+      // Process sessions for additional metrics
+      sessions?.forEach(session => {
         const siteName = session.branch;
-        const sessionDate = session.session_date;
-        const sessionHour = new Date(session.session_start_time).getHours();
-        const operatingHours = parseFloat(session.operating_hours || 0);
-        const fuelUsage = parseFloat(session.total_usage || 0);
-        const fuelFill = parseFloat(session.total_fill || 0);
-        const cost = parseFloat(session.cost_for_usage || 0);
-
-        // Initialize site if not exists
-        if (!siteReports[siteName]) {
-          siteReports[siteName] = {
-            generator: siteName,
-            cost_code: session.cost_code,
-            company: 'KFC',
-            total_sessions: 0,
-            total_operating_hours: 0,
-            total_fuel_usage: 0,
-            total_fuel_fill: 0,
-            total_cost: 0,
-            peak_usage_amount: 0,
-            peak_usage_session: null,
-            longest_session_hours: 0,
-            longest_session: null,
-            sessions_by_hour: {},
-            daily_breakdown: []
-          };
+        if (siteReports[siteName]) {
+          siteReports[siteName].total_sessions++;
+          siteReports[siteName].total_operating_hours += parseFloat(session.operating_hours || 0);
+          siteReports[siteName].total_fuel_usage += parseFloat(session.total_usage || 0);
         }
-
-        const report = siteReports[siteName];
-
-        // Aggregate totals
-        report.total_sessions++;
-        report.total_operating_hours += operatingHours;
-        report.total_fuel_usage += fuelUsage;
-        report.total_fuel_fill += fuelFill;
-        report.total_cost += cost;
-
-        // Track peak usage session
-        if (fuelUsage > report.peak_usage_amount) {
-          report.peak_usage_amount = fuelUsage;
-          report.peak_usage_session = {
-            date: sessionDate,
-            start_time: session.session_start_time,
-            end_time: session.session_end_time,
-            hours: operatingHours,
-            usage: fuelUsage
-          };
-        }
-
-        // Track longest session
-        if (operatingHours > report.longest_session_hours) {
-          report.longest_session_hours = operatingHours;
-          report.longest_session = {
-            date: sessionDate,
-            start_time: session.session_start_time,
-            end_time: session.session_end_time,
-            hours: operatingHours,
-            usage: fuelUsage
-          };
-        }
-
-        // Track hourly usage for peak analysis
-        if (!hourlyUsage[sessionHour]) {
-          hourlyUsage[sessionHour] = { hour: sessionHour, total_usage: 0, sessions: 0 };
-        }
-        hourlyUsage[sessionHour].total_usage += fuelUsage;
-        hourlyUsage[sessionHour].sessions++;
-
-        // Track daily usage
-        if (!dailyUsage[sessionDate]) {
-          dailyUsage[sessionDate] = { date: sessionDate, total_usage: 0, sessions: 0 };
-        }
-        dailyUsage[sessionDate].total_usage += fuelUsage;
-        dailyUsage[sessionDate].sessions++;
       });
 
-      // Calculate metrics for each site
+      // Calculate peak time slot and total fuel usage for each site
       Object.values(siteReports).forEach(report => {
-        if (report.total_operating_hours > 0) {
-          report.average_usage_per_hour = report.total_fuel_usage / report.total_operating_hours;
-        } else {
-          report.average_usage_per_hour = 0;
-        }
+        const timeSlots = {
+          morning: report.morning_fuel,
+          afternoon: report.afternoon_fuel,
+          evening: report.evening_fuel
+        };
+        
+        const peakSlot = Object.entries(timeSlots)
+          .sort(([,a], [,b]) => b - a)[0];
+        
+        report.peak_time_slot = peakSlot[0];
+        report.peak_fuel_usage = peakSlot[1];
+        report.total_fuel_usage = report.morning_fuel + report.afternoon_fuel + report.evening_fuel;
       });
 
-      // Peak usage analysis
-      const peakHours = Object.values(hourlyUsage)
-        .sort((a, b) => b.total_usage - a.total_usage)
-        .slice(0, 5);
+      // Overall peak time slot
+      const overallPeakSlot = Object.entries(timeSlotTotals)
+        .sort(([,a], [,b]) => b - a)[0] || ['morning', 0];
 
-      const peakDays = Object.values(dailyUsage)
-        .sort((a, b) => b.total_usage - a.total_usage)
-        .slice(0, 5);
-
-      const peakAnalysis = {
-        peak_usage_hours: peakHours,
-        peak_usage_days: peakDays,
-        highest_usage_hour: peakHours[0] || null,
-        highest_usage_day: peakDays[0] || null
-      };
-
-      const reportData = Object.values(siteReports);
-      const totalHours = reportData.reduce((sum, r) => sum + r.total_operating_hours, 0);
-      const totalUsage = reportData.reduce((sum, r) => sum + r.total_fuel_usage, 0);
+      const reportData = Object.values(siteReports)
+        .filter(report => report.morning_fuel > 0 || report.afternoon_fuel > 0 || report.evening_fuel > 0)
+        .sort((a, b) => (b.morning_fuel + b.afternoon_fuel + b.evening_fuel) - (a.morning_fuel + a.afternoon_fuel + a.evening_fuel));
 
       res.status(200).json({
         success: true,
         data: {
           period: { start_date: start, end_date: end },
           total_sites: reportData.length,
-          peak_usage_analysis: peakAnalysis,
-          generator_reports: reportData,
+          overall_peak_time_slot: overallPeakSlot[0],
+          overall_peak_usage: overallPeakSlot[1],
+          time_slot_totals: timeSlotTotals,
+          site_reports: reportData,
           summary: {
+            total_morning_fuel: timeSlotTotals.morning,
+            total_afternoon_fuel: timeSlotTotals.afternoon,
+            total_evening_fuel: timeSlotTotals.evening,
+            total_fuel_across_slots: timeSlotTotals.morning + timeSlotTotals.afternoon + timeSlotTotals.evening,
             total_sessions: reportData.reduce((sum, r) => sum + r.total_sessions, 0),
-            total_operating_hours: totalHours,
-            total_fuel_usage: totalUsage,
-            total_fuel_fill: reportData.reduce((sum, r) => sum + r.total_fuel_fill, 0),
-            total_cost: reportData.reduce((sum, r) => sum + r.total_cost, 0),
-            average_efficiency: totalHours > 0 ? totalUsage / totalHours : 0
+            total_operating_hours: reportData.reduce((sum, r) => sum + r.total_operating_hours, 0)
           }
         },
         timestamp: new Date().toISOString()
@@ -279,6 +246,158 @@ class EnergyRiteActivityReportController {
 
     } catch (error) {
       console.error('Error generating peak usage analysis:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  /**
+   * Get comprehensive activity dashboard with snapshots and patterns
+   */
+  async getActivityDashboard(req, res) {
+    try {
+      const { startDate, endDate, days = 7 } = req.query;
+      
+      const defaultEndDate = new Date();
+      const defaultStartDate = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000);
+      
+      const start = startDate || defaultStartDate.toISOString().split('T')[0];
+      const end = endDate || defaultEndDate.toISOString().split('T')[0];
+      
+      // Get snapshots and patterns
+      const snapshots = await activitySnapshots.getSnapshots(start, end);
+      const patterns = await activitySnapshots.analyzeActivityPatterns(start, end);
+      
+      // Group snapshots by date
+      const dailyAnalysis = {};
+      const timeSlotTotals = { morning: 0, afternoon: 0, evening: 0 };
+      
+      snapshots.forEach(snapshot => {
+        const date = snapshot.snapshot_date;
+        if (!dailyAnalysis[date]) {
+          dailyAnalysis[date] = {
+            date,
+            morning: null,
+            afternoon: null,
+            evening: null,
+            peak_slot: null,
+            peak_activity: 0
+          };
+        }
+        
+        dailyAnalysis[date][snapshot.time_slot] = {
+          time_slot: snapshot.time_slot,
+          time_slot_name: snapshot.time_slot_name,
+          active_vehicles: snapshot.active_vehicles,
+          total_vehicles: snapshot.total_vehicles,
+          activity_percentage: (snapshot.active_vehicles / snapshot.total_vehicles) * 100,
+          average_fuel_percentage: snapshot.average_fuel_percentage,
+          snapshot_time: snapshot.snapshot_time
+        };
+        
+        if (snapshot.active_vehicles > dailyAnalysis[date].peak_activity) {
+          dailyAnalysis[date].peak_activity = snapshot.active_vehicles;
+          dailyAnalysis[date].peak_slot = snapshot.time_slot;
+        }
+        
+        timeSlotTotals[snapshot.time_slot] += snapshot.active_vehicles;
+      });
+      
+      const overallPeakSlot = Object.entries(timeSlotTotals)
+        .sort(([,a], [,b]) => b - a)[0] || ['morning', 0];
+      
+      const eveningPeakDays = Object.values(dailyAnalysis)
+        .filter(day => day.peak_slot === 'evening').length;
+      
+      const dashboard = {
+        period: { start_date: start, end_date: end },
+        summary: {
+          total_snapshots: snapshots.length,
+          total_days: Object.keys(dailyAnalysis).length,
+          overall_peak_time_slot: overallPeakSlot[0],
+          evening_peak_days: eveningPeakDays,
+          evening_peak_percentage: Object.keys(dailyAnalysis).length > 0 ? (eveningPeakDays / Object.keys(dailyAnalysis).length) * 100 : 0
+        },
+        daily_snapshots: Object.values(dailyAnalysis),
+        time_slot_analysis: {
+          morning: { total_activity: timeSlotTotals.morning, avg_activity: Object.keys(dailyAnalysis).length > 0 ? timeSlotTotals.morning / Object.keys(dailyAnalysis).length : 0 },
+          afternoon: { total_activity: timeSlotTotals.afternoon, avg_activity: Object.keys(dailyAnalysis).length > 0 ? timeSlotTotals.afternoon / Object.keys(dailyAnalysis).length : 0 },
+          evening: { total_activity: timeSlotTotals.evening, avg_activity: Object.keys(dailyAnalysis).length > 0 ? timeSlotTotals.evening / Object.keys(dailyAnalysis).length : 0 }
+        },
+        cost_code_patterns: patterns?.by_cost_code || {},
+        site_utilization: patterns?.trends?.site_utilization || {},
+        activity_trends: patterns?.trends || {}
+      };
+      
+      res.status(200).json({
+        success: true,
+        data: dashboard,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error('Error generating activity dashboard:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  /**
+   * Take manual snapshot
+   */
+  async takeSnapshot(req, res) {
+    try {
+      const snapshot = await activitySnapshots.takeSnapshot();
+      
+      res.status(200).json({
+        success: true,
+        data: snapshot,
+        message: 'Activity snapshot taken successfully',
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error('Error taking snapshot:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  /**
+   * Get activity patterns analysis
+   */
+  async getActivityPatterns(req, res) {
+    try {
+      const { startDate, endDate, days = 30 } = req.query;
+      
+      const defaultEndDate = new Date();
+      const defaultStartDate = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000);
+      
+      const start = startDate || defaultStartDate.toISOString().split('T')[0];
+      const end = endDate || defaultEndDate.toISOString().split('T')[0];
+      
+      const patterns = await activitySnapshots.analyzeActivityPatterns(start, end);
+      
+      res.status(200).json({
+        success: true,
+        data: {
+          period: { start_date: start, end_date: end },
+          patterns: patterns
+        },
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error('Error analyzing activity patterns:', error);
       res.status(500).json({
         success: false,
         error: error.message,

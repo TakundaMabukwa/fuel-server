@@ -88,11 +88,24 @@ class EnergyRiteWebSocketClient {
     
     const normalized = driverName.replace(/\s+/g, ' ').trim().toUpperCase();
     
-    // Check for ON patterns
-    if (normalized.includes('PTO ON') || normalized.includes('ENGINE ON')) return 'ON';
+    // Log all driver names for debugging
+    if (Math.random() < 0.1) { // Log 10% of messages
+      console.log('🔍 DriverName received:', driverName, '-> normalized:', normalized);
+    }
     
-    // Check for OFF patterns  
-    if (normalized.includes('PTO OFF') || normalized.includes('ENGINE OFF')) return 'OFF';
+    // Check for ON patterns (more comprehensive)
+    if (normalized.includes('PTO ON') || 
+        normalized.includes('ENGINE ON') ||
+        normalized.includes('GENERATOR ON') ||
+        normalized.includes('START') ||
+        normalized.includes('RUNNING')) return 'ON';
+    
+    // Check for OFF patterns (more comprehensive)
+    if (normalized.includes('PTO OFF') || 
+        normalized.includes('ENGINE OFF') ||
+        normalized.includes('GENERATOR OFF') ||
+        normalized.includes('STOP') ||
+        normalized.includes('IDLE')) return 'OFF';
     
     return null;
   }
@@ -125,19 +138,24 @@ class EnergyRiteWebSocketClient {
         if (existing.length === 0) {
           const vehicle = await getFuelData();
           
+          const openingFuel = parseFloat(vehicle?.fuel_probe_1_level) || parseFloat(vehicle?.fuel_level) || 0;
+          const openingPercentage = parseFloat(vehicle?.fuel_probe_1_level_percentage) || parseFloat(vehicle?.fuel_percentage) || 0;
+          
           await supabase.from('energy_rite_operating_sessions').insert({
             branch: plate,
             company: vehicle?.company || 'KFC',
             cost_code: vehicle?.cost_code,
             session_date: currentTime.toISOString().split('T')[0],
             session_start_time: currentTime.toISOString(),
-            opening_fuel: parseFloat(vehicle?.fuel_probe_1_level) || 0,
-            opening_percentage: parseFloat(vehicle?.fuel_probe_1_level_percentage) || null,
-            opening_volume: parseFloat(vehicle?.fuel_probe_1_volume_in_tank) || null,
-            opening_temperature: parseFloat(vehicle?.fuel_probe_1_temperature) || null,
+            opening_fuel: openingFuel,
+            opening_percentage: openingPercentage,
+            opening_volume: parseFloat(vehicle?.fuel_probe_1_volume_in_tank) || 0,
+            opening_temperature: parseFloat(vehicle?.fuel_probe_1_temperature) || 0,
             session_status: 'ONGOING',
-            notes: `Engine started at ${currentTime.toISOString()}`
+            notes: `Engine started. Opening: ${openingFuel}L (${openingPercentage}%)`
           });
+          
+          console.log(`🟢 Engine ON: ${plate} - Opening: ${openingFuel}L (${openingPercentage}%)`);
           
           console.log(`🟢 Engine ON: ${plate} session started`);
         }
@@ -157,28 +175,32 @@ class EnergyRiteWebSocketClient {
           const startTime = new Date(session.session_start_time);
           const operatingHours = Math.max(0, (currentTime - startTime) / 3600000);
           const startingFuel = session.opening_fuel || 0;
-          const currentFuel = parseFloat(vehicle?.fuel_probe_1_level) || 0;
+          const currentFuel = parseFloat(vehicle?.fuel_probe_1_level) || parseFloat(vehicle?.fuel_level) || 0;
           const fuelConsumed = Math.max(0, startingFuel - currentFuel);
           const fuelCost = fuelConsumed * 20;
           const literUsagePerHour = operatingHours > 0 ? fuelConsumed / operatingHours : 0;
+          
+          const closingPercentage = parseFloat(vehicle?.fuel_probe_1_level_percentage) || parseFloat(vehicle?.fuel_percentage) || 0;
           
           await supabase.from('energy_rite_operating_sessions')
             .update({
               session_end_time: currentTime.toISOString(),
               operating_hours: operatingHours,
               closing_fuel: currentFuel,
-              closing_percentage: parseFloat(vehicle?.fuel_probe_1_level_percentage) || null,
-              closing_volume: parseFloat(vehicle?.fuel_probe_1_volume_in_tank) || null,
-              closing_temperature: parseFloat(vehicle?.fuel_probe_1_temperature) || null,
+              closing_percentage: closingPercentage,
+              closing_volume: parseFloat(vehicle?.fuel_probe_1_volume_in_tank) || 0,
+              closing_temperature: parseFloat(vehicle?.fuel_probe_1_temperature) || 0,
               total_usage: fuelConsumed,
               liter_usage_per_hour: literUsagePerHour,
               cost_for_usage: fuelCost,
               session_status: 'COMPLETED',
-              notes: `Engine stopped. Duration: ${operatingHours.toFixed(2)}h, Fuel used: ${fuelConsumed.toFixed(1)}L`
+              notes: `Engine stopped. Duration: ${operatingHours.toFixed(2)}h, Opening: ${startingFuel}L, Closing: ${currentFuel}L, Used: ${fuelConsumed.toFixed(1)}L`
             })
             .eq('id', session.id);
             
-          console.log(`🔴 Engine OFF: ${plate} session completed - ${fuelConsumed.toFixed(1)}L used`);
+          console.log(`🔴 Engine OFF: ${plate} - Duration: ${operatingHours.toFixed(2)}h, Opening: ${startingFuel}L, Closing: ${currentFuel}L, Used: ${fuelConsumed.toFixed(1)}L`);
+            
+
         }
       }
       
@@ -197,6 +219,8 @@ class EnergyRiteWebSocketClient {
       console.error(`❌ Error handling session change for ${plate}:`, error.message);
     }
   }
+
+
 
   close() {
     if (this.ws) {
