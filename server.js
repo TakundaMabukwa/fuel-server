@@ -18,6 +18,7 @@ app.use('/api/energy-rite/fuel-analysis', require('./routes/energy-rite-fuel-ana
 app.use('/api/energy-rite/emails', require('./routes/energy-rite-emails'));
 app.use('/api/energy-rite/excel-reports', require('./routes/energy-rite-excel-reports'));
 app.use('/api/energy-rite/activity-reports', require('./routes/energy-rite-activity-reports'));
+app.use('/api/energy-rite/activity-excel-reports', require('./routes/energy-rite-activity-excel-reports'));
 app.use('/api/energy-rite/monitoring', require('./routes/energy-rite-monitoring'));
 app.use('/api/energy-rite/executive-dashboard', require('./routes/energy-rite-executive-dashboard'));
 app.use('/api/cost-center-access', require('./routes/cost-center-access'));

@@ -1,6 +1,59 @@
 const { supabase } = require('../../supabase-client');
 const activitySnapshots = require('../../helpers/activity-snapshots');
 
+/**
+ * Calculate fuel differences between two snapshots
+ */
+function calculateFuelDifferences(earlierSnapshot, laterSnapshot, siteReports, sitesToInclude, costCodeMap, periodName, timeSlotTotals) {
+  const earlierVehicles = {};
+  const laterVehicles = {};
+  
+  // Index vehicles by site name from earlier snapshot
+  (earlierSnapshot.vehicles_data || []).forEach(vehicle => {
+    const siteName = vehicle.branch || vehicle.plate;
+    if (sitesToInclude.includes(siteName)) {
+      earlierVehicles[siteName] = parseFloat(vehicle.fuel_level || 0);
+    }
+  });
+  
+  // Index vehicles by site name from later snapshot
+  (laterSnapshot.vehicles_data || []).forEach(vehicle => {
+    const siteName = vehicle.branch || vehicle.plate;
+    if (sitesToInclude.includes(siteName)) {
+      laterVehicles[siteName] = parseFloat(vehicle.fuel_level || 0);
+    }
+  });
+  
+  // Calculate differences for each site
+  Object.keys(earlierVehicles).forEach(siteName => {
+    if (laterVehicles[siteName] !== undefined) {
+      const fuelDifference = earlierVehicles[siteName] - laterVehicles[siteName];
+      const fuelUsage = fuelDifference > 0 ? fuelDifference : 0; // Only count positive differences as usage
+      
+      // Initialize site report if not exists
+      if (!siteReports[siteName]) {
+        siteReports[siteName] = {
+          generator: siteName,
+          cost_code: costCodeMap[siteName],
+          company: 'KFC',
+          morning_to_afternoon_usage: 0,
+          afternoon_to_evening_usage: 0,
+          morning_to_evening_usage: 0,
+          peak_time_slot: null,
+          peak_fuel_usage: 0,
+          total_fuel_usage: 0,
+          total_sessions: 0,
+          total_operating_hours: 0
+        };
+      }
+      
+      // Add fuel usage to the appropriate period
+      siteReports[siteName][`${periodName}_usage`] = (siteReports[siteName][`${periodName}_usage`] || 0) + fuelUsage;
+      timeSlotTotals[periodName] += fuelUsage;
+    }
+  });
+}
+
 class EnergyRiteActivityReportController {
 
   /**
@@ -83,42 +136,44 @@ class EnergyRiteActivityReportController {
         };
       });
 
-      // Process snapshots to calculate fuel usage by time slot
-      const timeSlotTotals = { morning: 0, afternoon: 0, evening: 0 };
+      // Group snapshots by date and time slot for fuel difference calculations
+      const dailySnapshots = {};
       
       snapshots?.forEach(snapshot => {
-        const vehiclesData = snapshot.vehicles_data || [];
+        const date = snapshot.snapshot_date;
+        const timeSlot = snapshot.time_slot;
         
-        vehiclesData.forEach(vehicle => {
-          const siteName = vehicle.branch || vehicle.plate; // Use branch as site name
-          const costCode = vehicle.cost_code;
-          
-          // Only process sites that are in our filtered list
-          if (!siteReports[siteName] && sitesToInclude.includes(siteName)) {
-            siteReports[siteName] = {
-              generator: siteName,
-              cost_code: costCode || costCodeMap[siteName],
-              company: vehicle.company || 'KFC',
-              morning_fuel: 0,
-              afternoon_fuel: 0,
-              evening_fuel: 0,
-              peak_time_slot: null,
-              peak_fuel_usage: 0,
-              total_fuel_usage: 0,
-              total_sessions: 0,
-              total_operating_hours: 0
-            };
-          }
-          
-          if (siteReports[siteName]) {
-            const fuelLevel = parseFloat(vehicle.fuel_level || 0);
-            const timeSlot = snapshot.time_slot;
-            
-            // Add fuel level to appropriate time slot
-            siteReports[siteName][`${timeSlot}_fuel`] += fuelLevel;
-            timeSlotTotals[timeSlot] += fuelLevel;
-          }
-        });
+        if (!dailySnapshots[date]) {
+          dailySnapshots[date] = { morning: null, afternoon: null, evening: null };
+        }
+        
+        dailySnapshots[date][timeSlot] = snapshot;
+      });
+      
+      // Calculate fuel usage differences for all 3 periods
+      const timeSlotTotals = { 
+        morning_to_afternoon: 0, 
+        afternoon_to_evening: 0,
+        morning_to_evening: 0  // Full day comparison
+      };
+      
+      Object.values(dailySnapshots).forEach(daySnapshots => {
+        const { morning, afternoon, evening } = daySnapshots;
+        
+        // Process morning to afternoon differences (6AM to 12PM)
+        if (morning && afternoon) {
+          calculateFuelDifferences(morning, afternoon, siteReports, sitesToInclude, costCodeMap, 'morning_to_afternoon', timeSlotTotals);
+        }
+        
+        // Process afternoon to evening differences (12PM to 6PM)
+        if (afternoon && evening) {
+          calculateFuelDifferences(afternoon, evening, siteReports, sitesToInclude, costCodeMap, 'afternoon_to_evening', timeSlotTotals);
+        }
+        
+        // Process full day differences (6AM to 6PM)
+        if (morning && evening) {
+          calculateFuelDifferences(morning, evening, siteReports, sitesToInclude, costCodeMap, 'morning_to_evening', timeSlotTotals);
+        }
       });
 
       // Get session data for additional metrics
@@ -147,27 +202,41 @@ class EnergyRiteActivityReportController {
 
       // Calculate peak time slot and total fuel usage for each site
       Object.values(siteReports).forEach(report => {
-        const timeSlots = {
-          morning: report.morning_fuel,
-          afternoon: report.afternoon_fuel,
-          evening: report.evening_fuel
+        const periods = {
+          morning_to_afternoon: report.morning_to_afternoon_usage || 0,
+          afternoon_to_evening: report.afternoon_to_evening_usage || 0,
+          morning_to_evening: report.morning_to_evening_usage || 0
         };
         
-        const peakSlot = Object.entries(timeSlots)
+        // Find which 6-hour period had the most usage
+        const peakPeriod = Object.entries(periods)
+          .filter(([key]) => key !== 'morning_to_evening') // Exclude full day for peak comparison
           .sort(([,a], [,b]) => b - a)[0];
         
-        report.peak_time_slot = peakSlot[0];
-        report.peak_fuel_usage = peakSlot[1];
-        report.total_fuel_usage = report.morning_fuel + report.afternoon_fuel + report.evening_fuel;
+        report.peak_time_slot = peakPeriod[0];
+        report.peak_fuel_usage = peakPeriod[1];
+        report.total_fuel_usage = report.morning_to_evening_usage || 0; // Use full day total
+        
+        // Add period breakdown for detailed analysis
+        report.period_breakdown = {
+          morning_to_afternoon: report.morning_to_afternoon_usage || 0,
+          afternoon_to_evening: report.afternoon_to_evening_usage || 0,
+          full_day_total: report.morning_to_evening_usage || 0
+        };
       });
 
-      // Overall peak time slot
-      const overallPeakSlot = Object.entries(timeSlotTotals)
-        .sort(([,a], [,b]) => b - a)[0] || ['morning', 0];
+      // Overall peak time slot (comparing 6-hour periods only)
+      const periodComparison = {
+        morning_to_afternoon: timeSlotTotals.morning_to_afternoon,
+        afternoon_to_evening: timeSlotTotals.afternoon_to_evening
+      };
+      
+      const overallPeakSlot = Object.entries(periodComparison)
+        .sort(([,a], [,b]) => b - a)[0] || ['morning_to_afternoon', 0];
 
       const reportData = Object.values(siteReports)
-        .filter(report => report.morning_fuel > 0 || report.afternoon_fuel > 0 || report.evening_fuel > 0)
-        .sort((a, b) => (b.morning_fuel + b.afternoon_fuel + b.evening_fuel) - (a.morning_fuel + a.afternoon_fuel + a.evening_fuel));
+        .filter(report => (report.morning_to_afternoon_usage || 0) > 0 || (report.afternoon_to_evening_usage || 0) > 0)
+        .sort((a, b) => b.total_fuel_usage - a.total_fuel_usage);
 
       res.status(200).json({
         success: true,
@@ -179,10 +248,15 @@ class EnergyRiteActivityReportController {
           time_slot_totals: timeSlotTotals,
           site_reports: reportData,
           summary: {
-            total_morning_fuel: timeSlotTotals.morning,
-            total_afternoon_fuel: timeSlotTotals.afternoon,
-            total_evening_fuel: timeSlotTotals.evening,
-            total_fuel_across_slots: timeSlotTotals.morning + timeSlotTotals.afternoon + timeSlotTotals.evening,
+            total_morning_to_afternoon_usage: timeSlotTotals.morning_to_afternoon,
+            total_afternoon_to_evening_usage: timeSlotTotals.afternoon_to_evening,
+            total_full_day_usage: timeSlotTotals.morning_to_evening,
+            period_comparison: {
+              morning_period: timeSlotTotals.morning_to_afternoon,
+              afternoon_period: timeSlotTotals.afternoon_to_evening,
+              peak_period: overallPeakSlot[0],
+              peak_usage: overallPeakSlot[1]
+            },
             total_sessions: reportData.reduce((sum, r) => sum + r.total_sessions, 0),
             total_operating_hours: reportData.reduce((sum, r) => sum + r.total_operating_hours, 0)
           }
