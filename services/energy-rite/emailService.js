@@ -38,15 +38,15 @@ class EnergyRiteEmailService {
     try {
       let query = supabase
         .from('energyrite_emails')
-        .select('recipient_email, branch')
+        .select('email, branch')
         .eq('status', 'active');
 
       if (costCode) {
         // Get emails for specific cost code OR emails that receive all reports
-        query = query.or(`branch.is.null,branch.eq.${costCode}`);
+        query = query.or(`cost_code.is.null,cost_code.eq.${costCode}`);
       }
 
-      const { data, error } = await query.order('recipient_email');
+      const { data, error } = await query.order('email');
       
       if (error) throw new Error(`Database error: ${error.message}`);
       
@@ -80,7 +80,7 @@ class EnergyRiteEmailService {
       }
 
       // Extract emails
-      const emails = recipients.map(r => r.recipient_email);
+      const emails = recipients.map(r => r.email);
       
       // Format stats for email
       const formattedStats = {
@@ -94,116 +94,35 @@ class EnergyRiteEmailService {
       
       // Generate HTML email template for report
       const emailHTML = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Energy Rite ${reportTypeName} Report</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              max-width: 800px;
-              margin: 0 auto;
-              background-color: #f4f4f4;
-            }
-            .container {
-              background-color: white;
-              padding: 30px;
-              border-radius: 8px;
-              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-              margin: 20px;
-            }
-            .header {
-              background-color: #0070f3;
-              color: white;
-              padding: 20px;
-              text-align: center;
-              border-radius: 8px 8px 0 0;
-              margin: -30px -30px 30px -30px;
-            }
-            .report-details {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 30px;
-              flex-wrap: wrap;
-            }
-            .report-info, .stats-info {
-              flex: 1;
-              min-width: 250px;
-              margin: 10px;
-            }
-            .report-info h3, .stats-info h3 {
-              color: #0070f3;
-              margin-bottom: 15px;
-              border-bottom: 2px solid #0070f3;
-              padding-bottom: 5px;
-            }
-            .button {
-              display: inline-block;
-              background-color: #28a745;
-              color: white;
-              padding: 12px 24px;
-              text-decoration: none;
-              border-radius: 6px;
-              margin: 20px 0;
-              font-weight: bold;
-              text-align: center;
-            }
-            .button:hover {
-              background-color: #218838;
-            }
-            .footer {
-              text-align: center;
-              margin-top: 30px;
-              font-size: 12px;
-              color: #6c757d;
-              border-top: 1px solid #e9ecef;
-              padding-top: 20px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h1>Energy Rite Report</h1>
-              <p>${reportTypeName} Report - ${period}</p>
-            </div>
-            
-            <p>Hello,</p>
-            <p>The Energy Rite ${reportTypeName} report for ${period} is now available. You can download it using the link below.</p>
-            
-            <div class="report-details">
-              <div class="report-info">
-                <h3>Report Information:</h3>
-                <p><strong>Type:</strong> ${reportTypeName} Report</p>
-                <p><strong>Period:</strong> ${period}</p>
-                <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
-                ${costCode ? `<p><strong>Cost Code:</strong> ${costCode}</p>` : ''}
-              </div>
-              
-              <div class="stats-info">
-                <h3>Report Statistics:</h3>
-                <p><strong>Total Sites:</strong> ${formattedStats.sites}</p>
-                <p><strong>Total Sessions:</strong> ${formattedStats.sessions}</p>
-                <p><strong>Total Operating Hours:</strong> ${formattedStats.operatingHours}</p>
-              </div>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${downloadUrl}" class="button" download="${fileName}">Download Report</a>
-            </div>
-            
-            <p>If you have any questions or need further information, please don't hesitate to contact us.</p>
-            
-            <div class="footer">
-              <p>This is an automated message from the Energy Rite system.</p>
-              <p>&copy; ${new Date().getFullYear()} Energy Rite - Smart Energy Made Simple</p>
-            </div>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background-color: #1e3a5f; color: white; padding: 20px; text-align: center;">
+            <img src="cid:logo" alt="EnergyRite Logo" style="max-width: 120px; height: auto; margin: 0 auto 15px; display: block;">
+            <h1>EnergyRite ${reportTypeName} Report</h1>
+            <p>${period}</p>
           </div>
-        </body>
-        </html>
+          <div style="padding: 20px; background-color: #f8f9fa; color: #333;">
+            <p><strong>Hello,</strong></p>
+            <p>Your EnergyRite ${reportTypeName} report for ${period} is ready for download.</p>
+            
+            <div style="background: white; padding: 15px; margin: 15px 0; border-radius: 5px; border-left: 4px solid #1e3a5f;">
+              <p><strong>Sites:</strong> ${formattedStats.sites} | <strong>Sessions:</strong> ${formattedStats.sessions} | <strong>Hours:</strong> ${formattedStats.operatingHours}</p>
+              ${costCode ? `<p><strong>Cost Code:</strong> ${costCode}</p>` : ''}
+              <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+            </div>
+            
+            <div style="text-align: center; margin: 20px 0;">
+              <a href="${downloadUrl}" style="display: inline-block; background-color: #1e3a5f; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;" download="${fileName}">
+                Download Report
+              </a>
+            </div>
+            
+            <hr style="border: 1px solid #ddd; margin: 20px 0;">
+            <p style="font-size: 12px; color: #666; text-align: center;">
+              This is an automated message from the EnergyRite system.<br>
+              © ${new Date().getFullYear()} EnergyRite - Smart Energy Management
+            </p>
+          </div>
+        </div>
       `;
 
       // Configure email
@@ -212,6 +131,11 @@ class EnergyRiteEmailService {
         to: emails.join(', '),
         subject: `Energy Rite ${reportTypeName} Report - ${period} ${costCode ? `(${costCode})` : ''}`,
         html: emailHTML,
+        attachments: [{
+          filename: 'logo.png',
+          path: './assets/logo.png',
+          cid: 'logo'
+        }]
       };
 
       // Send email with timeout
@@ -236,18 +160,22 @@ class EnergyRiteEmailService {
       // Send email
       const result = await sendWithTimeout();
       
-      // Log email to database
-      await supabase
-        .from('energyrite_emails')
-        .insert({
-          recipient_email: emails.join(', '),
-          subject: mailOptions.subject,
-          body: emailHTML,
-          email_type: reportType,
-          branch: costCode,
-          sent_at: new Date().toISOString(),
-          status: 'sent'
-        });
+      // Log email to database (create email_logs table if needed)
+      try {
+        await supabase
+          .from('energy_rite_email_logs')
+          .insert({
+            recipients: emails.join(', '),
+            subject: mailOptions.subject,
+            body: emailHTML,
+            email_type: reportType,
+            cost_code: costCode,
+            sent_at: new Date().toISOString(),
+            status: 'sent'
+          });
+      } catch (logError) {
+        console.log('Note: Email logging table may need to be created');
+      }
       
       console.log(`✅ Report email sent successfully to ${emails.length} recipients`);
       
@@ -263,19 +191,19 @@ class EnergyRiteEmailService {
       // Log failed email to database
       try {
         await supabase
-          .from('energyrite_emails')
+          .from('energy_rite_email_logs')
           .insert({
-            recipient_email: 'failed',
+            recipients: 'failed',
             subject: `Energy Rite ${reportType} Report - ${period}`,
             body: 'Email failed to send',
             email_type: reportType,
-            branch: costCode,
+            cost_code: costCode,
             sent_at: new Date().toISOString(),
             status: 'failed',
             error_message: error.message
           });
       } catch (logError) {
-        console.error('Failed to log email error:', logError.message);
+        console.log('Note: Email logging table may need to be created');
       }
       
       return { 

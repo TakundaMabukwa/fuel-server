@@ -187,6 +187,16 @@ class EnergyRiteExcelReportGenerator {
         allSites = vehicleLookup.map(v => v.plate);
         console.log(`📊 Excel Report - Found ${allSites.length} sites for ${accessibleCostCodes.length} accessible cost codes`);
         console.log(`📊 Excel Report - Sites: ${JSON.stringify(allSites)}`);
+      } else {
+        // For ALL cost codes (null), get ALL sites
+        console.log(`📊 Excel Report - Getting ALL sites (no cost code filter)`);
+        const { data: vehicleLookup, error: lookupError } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate, cost_code');
+        
+        if (lookupError) throw new Error(`Lookup error: ${lookupError.message}`);
+        allSites = vehicleLookup.map(v => v.plate);
+        console.log(`📊 Excel Report - Found ${allSites.length} total sites across all cost codes`);
       }
       
       // Get completed operating sessions

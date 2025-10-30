@@ -21,6 +21,7 @@ app.use('/api/energy-rite/activity-reports', require('./routes/energy-rite-activ
 app.use('/api/energy-rite/activity-excel-reports', require('./routes/energy-rite-activity-excel-reports'));
 app.use('/api/energy-rite/monitoring', require('./routes/energy-rite-monitoring'));
 app.use('/api/energy-rite/executive-dashboard', require('./routes/energy-rite-executive-dashboard'));
+app.use('/api/energy-rite/report-distribution', require('./routes/energy-rite-report-distribution'));
 app.use('/api/cost-center-access', require('./routes/cost-center-access'));
 
 // Health check
@@ -69,6 +70,60 @@ app.listen(PORT, () => {
   
   // Take initial snapshot after 2 minutes
   setTimeout(() => activitySnapshots.takeSnapshot(), 2 * 60 * 1000);
+  
+  // Schedule automated report distribution
+  const cron = require('node-cron');
+  const reportDistributionService = require('./services/energy-rite/reportDistributionService');
+  
+  // Daily reports at 6:30 AM
+  cron.schedule('30 6 * * *', async () => {
+    console.log('🕕 6:30 AM - Starting automated daily report distribution...');
+    try {
+      const result = await reportDistributionService.scheduleDailyReports();
+      if (result.success) {
+        console.log(`✅ Daily reports distributed to ${result.successful_distributions} cost code groups`);
+      } else {
+        console.error('❌ Daily report distribution failed:', result.error);
+      }
+    } catch (error) {
+      console.error('❌ Error in scheduled daily report distribution:', error.message);
+    }
+  }, { timezone: 'Africa/Johannesburg' });
+  
+  // Weekly reports every Monday at 7:00 AM
+  cron.schedule('0 7 * * 1', async () => {
+    console.log('📊 Monday 7:00 AM - Starting automated weekly report distribution...');
+    try {
+      const result = await reportDistributionService.scheduleWeeklyReports();
+      if (result.success) {
+        console.log(`✅ Weekly reports distributed to ${result.successful_distributions} cost code groups`);
+      } else {
+        console.error('❌ Weekly report distribution failed:', result.error);
+      }
+    } catch (error) {
+      console.error('❌ Error in scheduled weekly report distribution:', error.message);
+    }
+  }, { timezone: 'Africa/Johannesburg' });
+  
+  // Monthly reports on 1st day of month at 8:00 AM
+  cron.schedule('0 8 1 * *', async () => {
+    console.log('📈 1st of month 8:00 AM - Starting automated monthly report distribution...');
+    try {
+      const result = await reportDistributionService.scheduleMonthlyReports();
+      if (result.success) {
+        console.log(`✅ Monthly reports distributed to ${result.successful_distributions} cost code groups`);
+      } else {
+        console.error('❌ Monthly report distribution failed:', result.error);
+      }
+    } catch (error) {
+      console.error('❌ Error in scheduled monthly report distribution:', error.message);
+    }
+  }, { timezone: 'Africa/Johannesburg' });
+  
+  console.log('⏰ Scheduled automated reports:');
+  console.log('   📅 Daily: 6:30 AM (South Africa time)');
+  console.log('   📅 Weekly: Monday 7:00 AM (South Africa time)');
+  console.log('   📅 Monthly: 1st day 8:00 AM (South Africa time)');
 });
 
 // Graceful shutdown

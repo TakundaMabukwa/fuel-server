@@ -263,6 +263,29 @@ class EnergyRiteActivityExcelReportController {
         .from('energyrite-reports')
         .getPublicUrl(bucketPath);
       
+      // Send automated email if requested
+      if (req.query.sendEmail === 'true') {
+        try {
+          const emailService = require('../../services/energy-rite/emailService');
+          const emailResult = await emailService.sendReportEmail({
+            reportType: 'activity',
+            period: `${activityData.period.start_date} to ${activityData.period.end_date}`,
+            fileName: fileName,
+            downloadUrl: publicUrl,
+            costCode: costCode || null,
+            stats: {
+              total_sites: activityData.total_sites,
+              total_sessions: activityData.summary.total_sessions,
+              total_operating_hours: activityData.summary.total_operating_hours
+            }
+          });
+          
+          console.log('📧 Email result:', emailResult);
+        } catch (emailError) {
+          console.error('📧 Email sending failed:', emailError.message);
+        }
+      }
+      
       res.status(200).json({
         success: true,
         message: 'Activity Excel report generated successfully',

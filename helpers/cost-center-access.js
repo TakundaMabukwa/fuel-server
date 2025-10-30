@@ -28,15 +28,11 @@ class CostCenterAccessHelper {
         accessibleCodes.push(userCostCode);
       }
       
-      // Add direct children only (one level deeper)
-      const userSegments = userCostCode.split('-');
+      // Add ALL descendants (children, grandchildren, etc.)
       uniqueCostCodes.forEach(code => {
         if (code !== userCostCode && code.startsWith(userCostCode + '-')) {
-          const codeSegments = code.split('-');
-          // Only include if it's exactly one level deeper
-          if (codeSegments.length === userSegments.length + 1) {
-            accessibleCodes.push(code);
-          }
+          // Include ALL levels deeper (hierarchical access)
+          accessibleCodes.push(code);
         }
       });
       

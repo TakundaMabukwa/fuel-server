@@ -8,7 +8,7 @@ class EnergyRiteEmailController {
     try {
       const { data, error } = await supabase
         .from('energyrite_emails')
-        .select('id, recipient_email, branch, created_at, updated_at')
+        .select('id, email, branch, cost_code, status, email_type, recipient_name, created_at, updated_at')
         .order('id', { ascending: true });
       
       if (error) throw new Error(`Database error: ${error.message}`);
@@ -52,12 +52,13 @@ class EnergyRiteEmailController {
       const { data, error } = await supabase
         .from('energyrite_emails')
         .upsert({
-          recipient_email: email,
+          email: email,
+          cost_code: cost_code || null,
           branch: cost_code || null,
           status: 'active',
           email_type: 'report'
         }, {
-          onConflict: 'recipient_email,branch'
+          onConflict: 'email,cost_code'
         })
         .select();
       
@@ -104,7 +105,8 @@ class EnergyRiteEmailController {
       const { data, error } = await supabase
         .from('energyrite_emails')
         .update({
-          recipient_email: email,
+          email: email,
+          cost_code: cost_code || null,
           branch: cost_code || null,
           updated_at: new Date().toISOString()
         })
@@ -178,8 +180,8 @@ class EnergyRiteEmailController {
       
       const { data, error } = await supabase
         .from('energyrite_emails')
-        .select('id, recipient_email, branch, created_at, updated_at')
-        .eq('branch', cost_code)
+        .select('id, email, branch, cost_code, status, email_type, recipient_name, created_at, updated_at')
+        .eq('cost_code', cost_code)
         .order('id', { ascending: true });
       
       if (error) throw new Error(`Database error: ${error.message}`);
