@@ -12,10 +12,11 @@ class EnergyRiteReportDocumentsController {
       const { 
         report_type = 'daily', 
         target_date = null, 
-        cost_code = null 
+        cost_code = null,
+        site_id = null
       } = { ...req.body, ...req.query }; // Accept from both body and query params
       
-      console.log(`📅 Request params: type=${report_type}, date=${target_date}, cost_code=${cost_code}`);
+      console.log(`📅 Request params: type=${report_type}, date=${target_date}, cost_code=${cost_code}, site_id=${site_id}`);
       
       console.log(`📊 Generating ${report_type} Excel report for ${target_date || 'today'}...`);
       
@@ -29,7 +30,8 @@ class EnergyRiteReportDocumentsController {
       const result = await ExcelReportGenerator.generateExcelReport(
         report_type, 
         target_date, 
-        cost_code
+        cost_code,
+        site_id
       );
       
       // Send email with the report
@@ -40,6 +42,7 @@ class EnergyRiteReportDocumentsController {
           fileName: result.file_name,
           downloadUrl: result.download_url,
           costCode: cost_code,
+          siteId: site_id,
           stats: result.stats
         });
         console.log(`📧 Report email sent to ${emailResult.recipients} recipients`);

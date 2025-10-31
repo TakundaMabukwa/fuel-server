@@ -8,7 +8,7 @@ class CostCenterAccessHelper {
    * - KFC-0001-0001-0002 (exact match)
    * - KFC-0001-0001-0002-XXXX (direct children only)
    */
-  async getAccessibleCostCenters(userCostCode) {
+  async getAccessibleCostCenters(userCostCode, siteId = null) {
     try {
       if (!userCostCode) return [];
       
@@ -38,6 +38,11 @@ class CostCenterAccessHelper {
       
       console.log(`🔐 User ${userCostCode} has access to ${accessibleCodes.length} cost centers: ${accessibleCodes.join(', ')}`);
       
+      // If siteId specified, filter to only that site
+      if (siteId) {
+        return this.filterBySiteId(accessibleCodes, siteId);
+      }
+      
       return accessibleCodes;
       
     } catch (error) {
@@ -65,6 +70,62 @@ class CostCenterAccessHelper {
     return allCostCenters.filter(costCode => 
       costCode.startsWith(userCostCode)
     );
+  }
+  
+  /**
+   * Filter cost centers to only include specific site
+   */
+  async filterBySiteId(costCodes, siteId) {
+    try {
+      const { data: siteData, error } = await supabase
+        .from('energyrite_vehicle_lookup')
+        .select('cost_code')
+        .eq('plate', siteId)
+        .single();
+      
+      if (error || !siteData) {
+        console.log(`⚠️ Site ${siteId} not found`);
+        return [];
+      }
+      
+      // Return only the cost code that matches this site
+      const siteCostCode = siteData.cost_code;
+      return costCodes.includes(siteCostCode) ? [siteCostCode] : [];
+      
+    } catch (error) {
+      console.error('❌ Error filtering by site ID:', error);
+      return [];
+    }
+  }
+  
+  /**
+   * Get accessible sites for user
+   */
+  async getAccessibleSites(userCostCode, siteId = null) {
+    try {
+      const accessibleCostCodes = await this.getAccessibleCostCenters(userCostCode, siteId);
+      
+      if (accessibleCostCodes.length === 0) return [];
+      
+      const { data: sites, error } = await supabase
+        .from('energyrite_vehicle_lookup')
+        .select('plate, cost_code')
+        .in('cost_code', accessibleCostCodes)
+        .order('plate');
+      
+      if (error) throw error;
+      
+      // If specific site requested, filter to that site only
+      if (siteId) {
+        return sites.filter(site => site.plate === siteId);
+      }
+      
+      return sites;
+      
+    } catch (error) {
+      console.error('❌ Error getting accessible sites:', error);
+      return [];
+    }
   }
   
   /**

@@ -210,7 +210,7 @@ class EnergyRiteReportsController {
   // Activity Report - Daily snapshot of activity for selected date and cost center
   async getActivityReport(req, res) {
     try {
-      const { date, cost_code } = req.query;
+      const { date, cost_code, site_id } = req.query;
       const targetDate = date || new Date().toISOString().split('T')[0];
       
       // Get operating sessions for the selected date
@@ -235,8 +235,10 @@ class EnergyRiteReportsController {
         .order('branch')
         .order('session_start_time');
       
-      // Apply hierarchical cost code filtering if provided
-      if (cost_code) {
+      // Apply filtering based on site_id or cost_code
+      if (site_id) {
+        sessionsQuery = sessionsQuery.eq('branch', site_id);
+      } else if (cost_code) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
         sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
@@ -380,6 +382,7 @@ class EnergyRiteReportsController {
         data: {
           date: targetDate,
           cost_code: cost_code || 'All',
+          site_id: site_id,
           summary: summary,
           sites: Object.values(activitySummary)
         }
@@ -910,13 +913,13 @@ class EnergyRiteReportsController {
   // Generate Daily Report by Cost Code
   async generateDailyReportByCostCode(req, res) {
     try {
-      const { cost_code, date } = req.query;
+      const { cost_code, date, site_id } = req.query;
       const targetDate = date || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // Yesterday by default
       
-      if (!cost_code) {
+      if (!cost_code && !site_id) {
         return res.status(400).json({
           success: false,
-          error: 'cost_code parameter is required'
+          error: 'cost_code or site_id parameter is required'
         });
       }
 
@@ -929,16 +932,22 @@ class EnergyRiteReportsController {
       
       if (fuelError) throw new Error(`Fuel data error: ${fuelError.message}`);
 
-      // Get vehicle lookup for cost code filtering
-      const { data: vehicleLookup, error: lookupError } = await supabase
-        .from('energyrite_vehicle_lookup')
-        .select('*')
-        .eq('cost_code', cost_code);
+      // Get vehicle lookup for filtering
+      let vehicleLookupQuery = supabase.from('energyrite_vehicle_lookup').select('*');
       
+      if (site_id) {
+        vehicleLookupQuery = vehicleLookupQuery.eq('plate', site_id);
+      } else if (cost_code) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        vehicleLookupQuery = vehicleLookupQuery.in('cost_code', accessibleCostCodes);
+      }
+      
+      const { data: vehicleLookup, error: lookupError } = await vehicleLookupQuery;
       if (lookupError) throw new Error(`Lookup error: ${lookupError.message}`);
 
-      const costCodePlates = vehicleLookup.map(v => v.plate);
-      const filteredFuelData = fuelData.filter(f => costCodePlates.includes(f.plate));
+      const allowedPlates = vehicleLookup.map(v => v.plate);
+      const filteredFuelData = fuelData.filter(f => allowedPlates.includes(f.plate));
 
       // Calculate metrics
       const sites = {};
@@ -975,6 +984,7 @@ class EnergyRiteReportsController {
         data: {
           date: targetDate,
           cost_code: cost_code,
+          site_id: site_id,
           sites: Object.values(sites),
           summary: {
             total_sites: Object.keys(sites).length,
@@ -997,14 +1007,14 @@ class EnergyRiteReportsController {
   // Generate Weekly Report by Cost Code
   async generateWeeklyReportByCostCode(req, res) {
     try {
-      const { cost_code, week, year } = req.query;
+      const { cost_code, week, year, site_id } = req.query;
       const targetYear = year || new Date().getFullYear();
       const targetWeek = week || this.getWeekNumber(new Date());
       
-      if (!cost_code) {
+      if (!cost_code && !site_id) {
         return res.status(400).json({
           success: false,
-          error: 'cost_code parameter is required'
+          error: 'cost_code or site_id parameter is required'
         });
       }
 
@@ -1013,13 +1023,22 @@ class EnergyRiteReportsController {
       weekEnd.setDate(weekEnd.getDate() + 6);
 
       // Get operating sessions for the week
-      const { data: sessionsData, error: sessionsError } = await supabase
+      let sessionsQuery = supabase
         .from('energy_rite_operating_sessions')
         .select('*')
-        .eq('cost_code', cost_code)
         .gte('session_date', weekStart.toISOString().split('T')[0])
         .lte('session_date', weekEnd.toISOString().split('T')[0])
         .eq('session_status', 'COMPLETED');
+      
+      if (site_id) {
+        sessionsQuery = sessionsQuery.eq('branch', site_id);
+      } else if (cost_code) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
+      }
+      
+      const { data: sessionsData, error: sessionsError } = await sessionsQuery;
       
       if (sessionsError) throw new Error(`Sessions error: ${sessionsError.message}`);
 
@@ -1057,6 +1076,7 @@ class EnergyRiteReportsController {
           week: targetWeek,
           year: targetYear,
           cost_code: cost_code,
+          site_id: site_id,
           week_start: weekStart.toISOString().split('T')[0],
           week_end: weekEnd.toISOString().split('T')[0],
           daily_breakdown: Object.values(dailyData).sort((a, b) => new Date(a.date) - new Date(b.date)),
@@ -1077,14 +1097,14 @@ class EnergyRiteReportsController {
   // Generate Monthly Report by Cost Code
   async generateMonthlyReportByCostCode(req, res) {
     try {
-      const { cost_code, month, year } = req.query;
+      const { cost_code, month, year, site_id } = req.query;
       const targetMonth = month || new Date().getMonth() + 1;
       const targetYear = year || new Date().getFullYear();
       
-      if (!cost_code) {
+      if (!cost_code && !site_id) {
         return res.status(400).json({
           success: false,
-          error: 'cost_code parameter is required'
+          error: 'cost_code or site_id parameter is required'
         });
       }
 
@@ -1092,13 +1112,22 @@ class EnergyRiteReportsController {
       const endOfMonth = new Date(targetYear, targetMonth, 0).toISOString().split('T')[0];
 
       // Get operating sessions for the month
-      const { data: sessionsData, error: sessionsError } = await supabase
+      let sessionsQuery = supabase
         .from('energy_rite_operating_sessions')
         .select('*')
-        .eq('cost_code', cost_code)
         .gte('session_date', startOfMonth)
         .lte('session_date', endOfMonth)
         .eq('session_status', 'COMPLETED');
+      
+      if (site_id) {
+        sessionsQuery = sessionsQuery.eq('branch', site_id);
+      } else if (cost_code) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
+      }
+      
+      const { data: sessionsData, error: sessionsError } = await sessionsQuery;
       
       if (sessionsError) throw new Error(`Sessions error: ${sessionsError.message}`);
 
@@ -1157,6 +1186,7 @@ class EnergyRiteReportsController {
           month: targetMonth,
           year: targetYear,
           cost_code: cost_code,
+          site_id: site_id,
           period: `${targetMonth}/${targetYear}`,
           branches: Object.values(branchData),
           weekly_breakdown: Object.values(weeklyData).sort((a, b) => a.week - b.week),

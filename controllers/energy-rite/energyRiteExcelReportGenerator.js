@@ -8,7 +8,7 @@ class EnergyRiteExcelReportGenerator {
   /**
    * Generate comprehensive Excel report with expandable sections
    */
-  async generateExcelReport(reportType = 'daily', targetDate = null, cost_code = null) {
+  async generateExcelReport(reportType = 'daily', targetDate = null, cost_code = null, site_id = null) {
     try {
       console.log(`🔄 Generating ${reportType} Excel report...`);
       
@@ -18,7 +18,7 @@ class EnergyRiteExcelReportGenerator {
       const { startDate, endDate, periodName } = this.calculateDateRange(reportType, reportDate);
       
       // Get operating sessions data
-      const sessionsData = await this.getOperatingSessionsData(startDate, endDate, cost_code);
+      const sessionsData = await this.getOperatingSessionsData(startDate, endDate, cost_code, site_id);
       
       // Create Excel workbook
       const workbook = new ExcelJS.Workbook();
@@ -166,13 +166,31 @@ class EnergyRiteExcelReportGenerator {
   /**
    * Get operating sessions data from Supabase
    */
-  async getOperatingSessionsData(startDate, endDate, cost_code = null) {
+  async getOperatingSessionsData(startDate, endDate, cost_code = null, site_id = null) {
     try {
       console.log(`📊 Getting operating sessions data for Excel report`);
       
       // Get all sites for the cost code from vehicle lookup with hierarchical access
       let allSites = [];
-      if (cost_code) {
+      if (site_id) {
+        // Single site filtering
+        console.log(`📊 Excel Report - Single site filter: ${site_id}`);
+        const { data: siteData, error: siteError } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate, cost_code')
+          .eq('plate', site_id)
+          .single();
+        
+        if (siteError || !siteData) {
+          console.log(`⚠️ Site ${site_id} not found, falling back to cost_code filtering`);
+          // Fallback to cost_code filtering if site not found
+        } else {
+          allSites = [siteData.plate];
+          console.log(`📊 Excel Report - Single site: ${siteData.plate}`);
+        }
+      }
+      
+      if ((!site_id || allSites.length === 0) && cost_code) {
         console.log(`📊 Excel Report - Input cost code: ${cost_code}`);
         const costCenterAccess = require('../../helpers/cost-center-access');
         const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
@@ -187,7 +205,7 @@ class EnergyRiteExcelReportGenerator {
         allSites = vehicleLookup.map(v => v.plate);
         console.log(`📊 Excel Report - Found ${allSites.length} sites for ${accessibleCostCodes.length} accessible cost codes`);
         console.log(`📊 Excel Report - Sites: ${JSON.stringify(allSites)}`);
-      } else {
+      } else if (!site_id && !cost_code) {
         // For ALL cost codes (null), get ALL sites
         console.log(`📊 Excel Report - Getting ALL sites (no cost code filter)`);
         const { data: vehicleLookup, error: lookupError } = await supabase
@@ -207,8 +225,8 @@ class EnergyRiteExcelReportGenerator {
         .gte('session_start_time', startDate.toISOString())
         .lte('session_start_time', endDate.toISOString());
       
-      // Filter by branch names if cost_code is provided
-      if (cost_code && allSites.length > 0) {
+      // Filter by branch names if cost_code or site_id is provided
+      if ((cost_code || site_id) && allSites.length > 0) {
         query = query.in('branch', allSites);
       }
       
@@ -625,22 +643,22 @@ class EnergyRiteExcelReportGenerator {
   /**
    * Generate daily report
    */
-  async generateDailyReport(targetDate = null, cost_code = null) {
-    return this.generateExcelReport('daily', targetDate, cost_code);
+  async generateDailyReport(targetDate = null, cost_code = null, site_id = null) {
+    return this.generateExcelReport('daily', targetDate, cost_code, site_id);
   }
   
   /**
    * Generate weekly report (last 7 days)
    */
-  async generateWeeklyReport(targetDate = null, cost_code = null) {
-    return this.generateExcelReport('weekly', targetDate, cost_code);
+  async generateWeeklyReport(targetDate = null, cost_code = null, site_id = null) {
+    return this.generateExcelReport('weekly', targetDate, cost_code, site_id);
   }
   
   /**
    * Generate monthly report
    */
-  async generateMonthlyReport(targetDate = null, cost_code = null) {
-    return this.generateExcelReport('monthly', targetDate, cost_code);
+  async generateMonthlyReport(targetDate = null, cost_code = null, site_id = null) {
+    return this.generateExcelReport('monthly', targetDate, cost_code, site_id);
   }
 }
 

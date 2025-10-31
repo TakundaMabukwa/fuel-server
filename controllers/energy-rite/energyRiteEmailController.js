@@ -8,7 +8,7 @@ class EnergyRiteEmailController {
     try {
       const { data, error } = await supabase
         .from('energyrite_emails')
-        .select('id, email, branch, cost_code, status, email_type, recipient_name, created_at, updated_at')
+        .select('id, email, branch, cost_code, site_id, status, email_type, recipient_name, created_at, updated_at')
         .order('id', { ascending: true });
       
       if (error) throw new Error(`Database error: ${error.message}`);
@@ -31,7 +31,7 @@ class EnergyRiteEmailController {
    */
   async addEmail(req, res) {
     try {
-      const { email, cost_code } = req.body;
+      const { email, cost_code, site_id } = req.body;
       
       if (!email) {
         return res.status(400).json({
@@ -54,6 +54,7 @@ class EnergyRiteEmailController {
         .upsert({
           email: email,
           cost_code: cost_code || null,
+          site_id: site_id || null,
           branch: cost_code || null,
           status: 'active',
           email_type: 'report'
@@ -84,7 +85,7 @@ class EnergyRiteEmailController {
   async updateEmail(req, res) {
     try {
       const { id } = req.params;
-      const { email, cost_code } = req.body;
+      const { email, cost_code, site_id } = req.body;
       
       if (!email) {
         return res.status(400).json({
@@ -107,6 +108,7 @@ class EnergyRiteEmailController {
         .update({
           email: email,
           cost_code: cost_code || null,
+          site_id: site_id || null,
           branch: cost_code || null,
           updated_at: new Date().toISOString()
         })
@@ -180,7 +182,7 @@ class EnergyRiteEmailController {
       
       const { data, error } = await supabase
         .from('energyrite_emails')
-        .select('id, email, branch, cost_code, status, email_type, recipient_name, created_at, updated_at')
+        .select('id, email, branch, cost_code, site_id, status, email_type, recipient_name, created_at, updated_at')
         .eq('cost_code', cost_code)
         .order('id', { ascending: true });
       

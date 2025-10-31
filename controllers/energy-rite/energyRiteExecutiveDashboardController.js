@@ -9,7 +9,7 @@ class EnergyRiteExecutiveDashboardController {
    */
   async getExecutiveDashboard(req, res) {
     try {
-      const { days = 30, costCode, costCodes, month } = req.query;
+      const { days = 30, costCode, costCodes, month, site_id } = req.query;
       
       let startDate, endDate, start, end;
       
@@ -34,8 +34,10 @@ class EnergyRiteExecutiveDashboardController {
       const vehicleResponse = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles');
       let vehicles = vehicleResponse.data.data;
       
-      // Filter vehicles by cost code with hierarchical access
-      if (costCode || costCodes) {
+      // Filter vehicles by site_id or cost code with hierarchical access
+      if (site_id) {
+        vehicles = vehicles.filter(v => v.branch === site_id);
+      } else if (costCode || costCodes) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         let accessibleCostCodes = [];
         
@@ -76,8 +78,10 @@ class EnergyRiteExecutiveDashboardController {
         .lte('session_date', end)
         .eq('session_status', 'COMPLETED');
         
-      // Apply hierarchical cost code filtering if provided
-      if (costCode || costCodes) {
+      // Apply filtering by site_id or hierarchical cost code filtering if provided
+      if (site_id) {
+        sessionsQuery = sessionsQuery.eq('branch', site_id);
+      } else if (costCode || costCodes) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         let accessibleCostCodes = [];
         
@@ -196,7 +200,8 @@ class EnergyRiteExecutiveDashboardController {
           days: month ? Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) : parseInt(days),
           month_filter: month || null,
           cost_code_filter: costCode || null,
-          cost_codes_filter: costCodes || null
+          cost_codes_filter: costCodes || null,
+          site_id_filter: site_id || null
         },
         fleet_overview: {
           total_vehicles: totalVehicles,
