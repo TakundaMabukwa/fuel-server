@@ -11,14 +11,18 @@ class EnergyRiteReportDocumentsController {
     try {
       const { 
         report_type = 'daily', 
-        target_date = null, 
+        target_date = null,
+        date = null, // Accept 'date' parameter from frontend
         cost_code = null,
         site_id = null
       } = { ...req.body, ...req.query }; // Accept from both body and query params
       
-      console.log(`📅 Request params: type=${report_type}, date=${target_date}, cost_code=${cost_code}, site_id=${site_id}`);
+      // Use 'date' if provided, otherwise fall back to 'target_date'
+      const reportDate = date || target_date;
       
-      console.log(`📊 Generating ${report_type} Excel report for ${target_date || 'today'}...`);
+      console.log(`📅 Request params: type=${report_type}, date=${reportDate}, cost_code=${cost_code}, site_id=${site_id}`);
+      
+      console.log(`📊 Generating ${report_type} Excel report for ${reportDate || 'today'}...`);
       
       if (!['daily', 'weekly', 'monthly'].includes(report_type)) {
         return res.status(400).json({
@@ -29,7 +33,7 @@ class EnergyRiteReportDocumentsController {
       
       const result = await ExcelReportGenerator.generateExcelReport(
         report_type, 
-        target_date, 
+        reportDate, 
         cost_code,
         site_id
       );
