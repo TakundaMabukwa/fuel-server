@@ -247,6 +247,15 @@ class EnergyRiteReportsController {
       const { data: sessionsData, error: sessionsError } = await sessionsQuery;
       if (sessionsError) throw new Error(`Database error: ${sessionsError.message}`);
       
+      // Get activity snapshots for time period breakdown
+      const { data: snapshots, error: snapshotError } = await supabase
+        .from('energy_rite_activity_snapshots')
+        .select('*')
+        .eq('snapshot_date', targetDate)
+        .order('snapshot_time');
+        
+      if (snapshotError) console.log('No snapshots found for date:', snapshotError.message);
+      
       // Get fuel data for the day to show fuel level changes
       const { data: fuelData, error: fuelError } = await supabase
         .from('energy_rite_fuel_data')
@@ -370,6 +379,236 @@ class EnergyRiteReportsController {
         }
       });
       
+      // Get fuel readings at key times for consumption calculation
+      const keyTimes = {
+        start_of_day: { hour: 6, name: '6AM' },
+        midday: { hour: 12, name: '12PM' },
+        afternoon_end: { hour: 17, name: '5PM' },
+        end_of_day: { hour: 23, name: '11PM' }
+      };
+      
+      const fuelReadings = {};
+      for (const [key, time] of Object.entries(keyTimes)) {
+        const targetTime = new Date(targetDate + 'T' + time.hour.toString().padStart(2, '0') + ':00:00');
+        const startWindow = new Date(targetTime.getTime() - 30 * 60 * 1000); // 30 min before
+        const endWindow = new Date(targetTime.getTime() + 30 * 60 * 1000); // 30 min after
+        
+        const { data: readings } = await supabase
+          .from('energy_rite_fuel_data')
+          .select('plate, fuel_probe_1_level, created_at')
+          .gte('created_at', startWindow.toISOString())
+          .lte('created_at', endWindow.toISOString())
+          .order('created_at');
+          
+        fuelReadings[key] = readings || [];
+      }
+      
+      // Calculate fuel consumption by periods
+      const fuelConsumption = {
+        morning: { period: '6AM-12PM', usage: 0, sites: {} },
+        afternoon: { period: '12PM-5PM', usage: 0, sites: {} },
+        evening: { period: '5PM-11PM', usage: 0, sites: {} },
+        daily_total: { usage: 0, sites: {} }
+      };
+      
+      // Get sites that had sessions for the day
+      const sitesWithSessions = new Set(sessionsData.map(session => session.branch));
+      
+      // Only calculate fuel consumption for sites that had sessions
+      sitesWithSessions.forEach(site => {
+        // Filter readings for this site (and site_id if specified)
+        if (site_id && site !== site_id) return;
+        
+        const siteReadings = {
+          start_of_day: fuelReadings.start_of_day.filter(r => r.plate === site),
+          midday: fuelReadings.midday.filter(r => r.plate === site),
+          afternoon_end: fuelReadings.afternoon_end.filter(r => r.plate === site),
+          end_of_day: fuelReadings.end_of_day.filter(r => r.plate === site)
+        };
+        
+        // Get closest readings for each time (improved logic)
+        const getClosestReading = (readings, targetTime) => {
+          if (readings.length === 0) return null;
+          
+          // Find reading closest to target time
+          return readings.reduce((closest, current) => {
+            const currentDiff = Math.abs(new Date(current.created_at) - new Date(targetTime));
+            const closestDiff = Math.abs(new Date(closest.created_at) - new Date(targetTime));
+            return currentDiff < closestDiff ? current : closest;
+          });
+        };
+        
+        const targetTimes = {
+          start_of_day: new Date(targetDate + 'T06:00:00'),
+          midday: new Date(targetDate + 'T12:00:00'),
+          afternoon_end: new Date(targetDate + 'T17:00:00'),
+          end_of_day: new Date(targetDate + 'T23:00:00')
+        };
+        
+        const startReading = getClosestReading(siteReadings.start_of_day, targetTimes.start_of_day);
+        const middayReading = getClosestReading(siteReadings.midday, targetTimes.midday);
+        const afternoonReading = getClosestReading(siteReadings.afternoon_end, targetTimes.afternoon_end);
+        const endReading = getClosestReading(siteReadings.end_of_day, targetTimes.end_of_day);
+        
+        // Calculate period consumption with fuel fill detection
+        if (startReading && middayReading && 
+            startReading.fuel_probe_1_level && middayReading.fuel_probe_1_level) {
+          const startLevel = parseFloat(startReading.fuel_probe_1_level);
+          const middayLevel = parseFloat(middayReading.fuel_probe_1_level);
+          if (!isNaN(startLevel) && !isNaN(middayLevel)) {
+            // Check for fuel fills between readings (significant increase > 20L)
+            const levelDiff = middayLevel - startLevel;
+            if (levelDiff > 20) {
+              console.log(`⛽ Possible fuel fill detected for ${site} between 6AM-12PM: +${levelDiff.toFixed(1)}L`);
+              // Skip this period calculation due to fuel fill
+              fuelConsumption.morning.sites[site] = 'FUEL_FILL_DETECTED';
+            } else if (startLevel > middayLevel) {
+              const morningUsage = startLevel - middayLevel;
+              fuelConsumption.morning.usage += morningUsage;
+              fuelConsumption.morning.sites[site] = morningUsage;
+            }
+          }
+        }
+        
+        if (middayReading && afternoonReading && 
+            middayReading.fuel_probe_1_level && afternoonReading.fuel_probe_1_level) {
+          const middayLevel = parseFloat(middayReading.fuel_probe_1_level);
+          const afternoonLevel = parseFloat(afternoonReading.fuel_probe_1_level);
+          if (!isNaN(middayLevel) && !isNaN(afternoonLevel)) {
+            const levelDiff = afternoonLevel - middayLevel;
+            if (levelDiff > 20) {
+              console.log(`⛽ Possible fuel fill detected for ${site} between 12PM-5PM: +${levelDiff.toFixed(1)}L`);
+              fuelConsumption.afternoon.sites[site] = 'FUEL_FILL_DETECTED';
+            } else if (middayLevel > afternoonLevel) {
+              const afternoonUsage = middayLevel - afternoonLevel;
+              fuelConsumption.afternoon.usage += afternoonUsage;
+              fuelConsumption.afternoon.sites[site] = afternoonUsage;
+            }
+          }
+        }
+        
+        if (afternoonReading && endReading && 
+            afternoonReading.fuel_probe_1_level && endReading.fuel_probe_1_level) {
+          const afternoonLevel = parseFloat(afternoonReading.fuel_probe_1_level);
+          const endLevel = parseFloat(endReading.fuel_probe_1_level);
+          if (!isNaN(afternoonLevel) && !isNaN(endLevel)) {
+            const levelDiff = endLevel - afternoonLevel;
+            if (levelDiff > 20) {
+              console.log(`⛽ Possible fuel fill detected for ${site} between 5PM-11PM: +${levelDiff.toFixed(1)}L`);
+              fuelConsumption.evening.sites[site] = 'FUEL_FILL_DETECTED';
+            } else if (afternoonLevel > endLevel) {
+              const eveningUsage = afternoonLevel - endLevel;
+              fuelConsumption.evening.usage += eveningUsage;
+              fuelConsumption.evening.sites[site] = eveningUsage;
+            }
+          }
+        }
+        
+        // Daily total with fuel fill detection
+        if (startReading && endReading && 
+            startReading.fuel_probe_1_level && endReading.fuel_probe_1_level) {
+          const startLevel = parseFloat(startReading.fuel_probe_1_level);
+          const endLevel = parseFloat(endReading.fuel_probe_1_level);
+          if (!isNaN(startLevel) && !isNaN(endLevel)) {
+            const levelDiff = endLevel - startLevel;
+            if (levelDiff > 20) {
+              console.log(`⛽ Possible fuel fill detected for ${site} during day: +${levelDiff.toFixed(1)}L`);
+              fuelConsumption.daily_total.sites[site] = 'FUEL_FILL_DETECTED';
+            } else if (startLevel > endLevel) {
+              const dailyUsage = startLevel - endLevel;
+              fuelConsumption.daily_total.usage += dailyUsage;
+              fuelConsumption.daily_total.sites[site] = dailyUsage;
+            }
+          }
+        }
+      });
+      
+      // Calculate financial costs based on fuel consumption
+      const fuelCostPerLiter = 20; // R20 per liter (configurable)
+      
+      const financialAnalysis = {
+        morning: {
+          fuel_cost: fuelConsumption.morning.usage * fuelCostPerLiter,
+          cost_per_site: {}
+        },
+        afternoon: {
+          fuel_cost: fuelConsumption.afternoon.usage * fuelCostPerLiter,
+          cost_per_site: {}
+        },
+        evening: {
+          fuel_cost: fuelConsumption.evening.usage * fuelCostPerLiter,
+          cost_per_site: {}
+        },
+        daily_total: {
+          fuel_cost: fuelConsumption.daily_total.usage * fuelCostPerLiter,
+          cost_per_site: {}
+        }
+      };
+      
+      // Calculate costs per site for each period (handle fuel fills)
+      Object.entries(fuelConsumption.morning.sites).forEach(([site, usage]) => {
+        financialAnalysis.morning.cost_per_site[site] = 
+          typeof usage === 'string' ? usage : usage * fuelCostPerLiter;
+      });
+      
+      Object.entries(fuelConsumption.afternoon.sites).forEach(([site, usage]) => {
+        financialAnalysis.afternoon.cost_per_site[site] = 
+          typeof usage === 'string' ? usage : usage * fuelCostPerLiter;
+      });
+      
+      Object.entries(fuelConsumption.evening.sites).forEach(([site, usage]) => {
+        financialAnalysis.evening.cost_per_site[site] = 
+          typeof usage === 'string' ? usage : usage * fuelCostPerLiter;
+      });
+      
+      Object.entries(fuelConsumption.daily_total.sites).forEach(([site, usage]) => {
+        financialAnalysis.daily_total.cost_per_site[site] = 
+          typeof usage === 'string' ? usage : usage * fuelCostPerLiter;
+      });
+      
+      // Find peak usage period and site
+      const periodUsages = [
+        { period: 'morning', usage: fuelConsumption.morning.usage, cost: financialAnalysis.morning.fuel_cost, name: 'Morning (6AM-12PM)' },
+        { period: 'afternoon', usage: fuelConsumption.afternoon.usage, cost: financialAnalysis.afternoon.fuel_cost, name: 'Afternoon (12PM-5PM)' },
+        { period: 'evening', usage: fuelConsumption.evening.usage, cost: financialAnalysis.evening.fuel_cost, name: 'Evening (5PM-11PM)' }
+      ];
+      
+      const peakPeriod = periodUsages.reduce((max, current) => 
+        current.usage > max.usage ? current : max
+      );
+      
+      const peakSite = Object.entries(fuelConsumption.daily_total.sites)
+        .reduce((max, [site, usage]) => 
+          usage > max.usage ? { site, usage, cost: usage * fuelCostPerLiter } : max
+        , { site: null, usage: 0, cost: 0 });
+      
+      // Process activity snapshots by time periods
+      const timePeriods = {
+        morning: { start: 7, end: 12, name: 'Morning (7AM-12PM)', data: null, fuel_consumption: fuelConsumption.morning },
+        afternoon: { start: 12, end: 17, name: 'Afternoon (12PM-5PM)', data: null, fuel_consumption: fuelConsumption.afternoon },
+        evening: { start: 17, end: 24, name: 'Evening (5PM-12AM)', data: null, fuel_consumption: fuelConsumption.evening }
+      };
+      
+      // Map snapshots to time periods
+      if (snapshots && snapshots.length > 0) {
+        snapshots.forEach(snapshot => {
+          const timeSlot = snapshot.time_slot;
+          if (timePeriods[timeSlot]) {
+            timePeriods[timeSlot].data = {
+              snapshot_time: snapshot.snapshot_time,
+              total_vehicles: snapshot.total_vehicles,
+              active_vehicles: snapshot.active_vehicles,
+              utilization_rate: ((snapshot.active_vehicles / snapshot.total_vehicles) * 100).toFixed(1),
+              total_fuel_level: snapshot.total_fuel_level,
+              average_fuel_percentage: snapshot.average_fuel_percentage.toFixed(1),
+              vehicles_breakdown: snapshot.vehicles_data ? snapshot.vehicles_data.filter(v => 
+                !site_id || v.branch === site_id
+              ) : []
+            };
+          }
+        });
+      }
+      
       // Merge fuel snapshots with activity summary
       Object.keys(fuelSnapshots).forEach(plate => {
         if (activitySummary[plate]) {
@@ -384,6 +623,29 @@ class EnergyRiteReportsController {
           cost_code: cost_code || 'All',
           site_id: site_id,
           summary: summary,
+          time_periods: timePeriods,
+          fuel_analysis: {
+            daily_total_consumption: fuelConsumption.daily_total.usage.toFixed(2),
+            daily_total_cost: financialAnalysis.daily_total.fuel_cost.toFixed(2),
+            fuel_cost_per_liter: fuelCostPerLiter,
+            peak_usage_period: peakPeriod,
+            peak_usage_site: peakSite,
+            period_breakdown: {
+              morning: {
+                fuel_usage: fuelConsumption.morning.usage.toFixed(2),
+                fuel_cost: financialAnalysis.morning.fuel_cost.toFixed(2)
+              },
+              afternoon: {
+                fuel_usage: fuelConsumption.afternoon.usage.toFixed(2),
+                fuel_cost: financialAnalysis.afternoon.fuel_cost.toFixed(2)
+              },
+              evening: {
+                fuel_usage: fuelConsumption.evening.usage.toFixed(2),
+                fuel_cost: financialAnalysis.evening.fuel_cost.toFixed(2)
+              }
+            },
+            financial_breakdown: financialAnalysis
+          },
           sites: Object.values(activitySummary)
         }
       });
