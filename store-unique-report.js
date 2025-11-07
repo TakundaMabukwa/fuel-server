@@ -12,7 +12,10 @@ async function storeUniqueReport() {
     const time = timestamp.split('T')[1].split('.')[0].replace(/:/g, '-');
     
     const filename = `daily-report-${date}-${time}.json`;
-    const mockUrl = `https://zcuaccuejbhttawwfqgp.supabase.co/storage/v1/object/public/reports/${filename}`;
+    // Use environment-based URL construction instead of hardcoded URL
+    const baseUrl = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
+    const projectRef = baseUrl.split('//')[1].split('.')[0];
+    const mockUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/reports/${filename}`;
     
     const { data, error } = await supabase
       .from('energy_rite_generated_reports')

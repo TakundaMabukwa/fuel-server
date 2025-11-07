@@ -8,9 +8,12 @@ async function storeReportSimple() {
     const response = await axios.get('http://localhost:4000/api/energy-rite/reports/daily');
     const reportData = response.data;
     
-    // Store directly in database with mock URL
+    // Store directly in database with environment-based URL
     const date = new Date().toISOString().split('T')[0];
-    const mockUrl = `https://zcuaccuejbhttawwfqgp.supabase.co/storage/v1/object/public/reports/daily-report-${date}.json`;
+    // Use environment-based URL construction instead of hardcoded URL
+    const baseUrl = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
+    const projectRef = baseUrl.split('//')[1].split('.')[0];
+    const mockUrl = `https://${projectRef}.supabase.co/storage/v1/object/public/reports/daily-report-${date}.json`;
     
     const { data, error } = await supabase
       .from('energy_rite_generated_reports')
