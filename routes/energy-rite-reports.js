@@ -17,6 +17,12 @@ router.get('/monthly', energyRiteReportsController.getMonthlyReport);
 // Activity Report
 router.get('/activity', energyRiteReportsController.getActivityReport);
 
+// Download Activity Report
+router.get('/activity/download', energyRiteReportsController.downloadActivityReport);
+
+// Snapshot Data with Cost Code Filtering
+router.get('/snapshots', energyRiteReportsController.getSnapshotData);
+
 // Generate daily report data
 router.post('/daily/generate', energyRiteReportsController.generateDailyReportData);
 

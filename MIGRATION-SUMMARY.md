@@ -49,7 +49,43 @@
 - **RLS Policies**: Row Level Security enabled with policies
 - **Data Types**: Proper mapping from PostgreSQL to Supabase
 
-## 🔄 **Migration Patterns Established**
+## � **URGENT: COST CODE ENHANCEMENT STATUS**
+
+### Current Issue
+The energy_rite_daily_snapshots table is missing the `snapshot_data` JSONB column required for the cost code enhancement.
+
+### ✅ COMPLETED WORK
+- Enhanced snapshot scheduler with cost code integration
+- Site mapping from energy_rite_operating_sessions working (10 sessions found)
+- Application code ready and functional
+- Multiple migration files created
+
+### 🔧 AVAILABLE SOLUTIONS (choose ONE):
+
+1. **🟢 simple-add-column.sql (RECOMMENDED)**
+   - Only adds missing snapshot_data column
+   - Safest approach, no constraint conflicts
+   
+2. **🟡 minimal-schema-fix.sql**
+   - Adds column + basic indexes
+   - May have constraint issues
+   
+3. **🟠 ultra-safe-schema-fix.sql**
+   - Diagnostic approach to test constraints
+   
+4. **🔴 final-schema-fix.sql**
+   - Complete optimization with B-tree indexes
+
+### 🎯 RECOMMENDED NEXT STEP:
+Apply simple-add-column.sql in Supabase SQL Editor:
+```sql
+ALTER TABLE energy_rite_daily_snapshots 
+ADD COLUMN IF NOT EXISTS snapshot_data JSONB DEFAULT '{}';
+```
+
+Then test the enhanced snapshot system - cost code integration is ready!
+
+## �🔄 **Migration Patterns Established**
 
 ### PostgreSQL → Supabase Query Conversion
 ```javascript

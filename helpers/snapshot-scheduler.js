@@ -9,6 +9,26 @@ async function captureScheduledSnapshot(snapshotType) {
     
     console.log(`📸 Starting ${snapshotType} snapshot capture at ${currentTime.toISOString()}`);
     
+    // First, get site mapping with cost codes from operating sessions
+    const { data: siteMappings, error: mappingError } = await supabase
+      .from('energy_rite_operating_sessions')
+      .select('branch, cost_code, company')
+      .not('branch', 'is', null)
+      .order('branch');
+    
+    if (mappingError) throw new Error(`Site mapping error: ${mappingError.message}`);
+    
+    // Create site mapping lookup
+    const siteMapping = {};
+    siteMappings.forEach(session => {
+      if (session.branch && !siteMapping[session.branch]) {
+        siteMapping[session.branch] = {
+          cost_code: session.cost_code,
+          company: session.company || 'KFC'
+        };
+      }
+    });
+    
     // Get all vehicles with current fuel data
     const { data: vehicles, error } = await supabase
       .from('energy_rite_fuel_data')
@@ -37,24 +57,33 @@ async function captureScheduledSnapshot(snapshotType) {
         const fuelVolume = parseFloat(vehicle.fuel_probe_1_volume_in_tank) || 0;
         const engineStatus = vehicle.status || 'UNKNOWN';
         
+        // Get site information from mapping
+        const siteInfo = siteMapping[vehicle.plate] || {
+          cost_code: null,
+          company: 'Unknown'
+        };
+        
         if (engineStatus === 'ON') activeCount++;
         totalFuel += fuelVolume;
         
-        // Insert snapshot with UPSERT to handle duplicates
+        // Insert snapshot (simple insert without upsert to avoid constraint issues)
         const { error: insertError } = await supabase
           .from('energy_rite_daily_snapshots')
-          .upsert({
+          .insert({
             snapshot_date: currentDate,
-            branch: vehicle.plate,
-            company: 'EnergyRite',
-            cost_code: vehicle.plate,
             snapshot_time: currentTime.toISOString(),
-            fuel_level: fuelLevel,
-            engine_status: engineStatus,
             snapshot_type: snapshotType,
-            notes: `${snapshotType} snapshot - ${engineStatus} - Fuel: ${fuelLevel}% (${fuelVolume}L)`
-          }, {
-            onConflict: 'snapshot_date,branch,snapshot_type'
+            branch: vehicle.plate,
+            company: siteInfo.company,
+            snapshot_data: {
+              fuel_level: fuelLevel,
+              fuel_volume: fuelVolume,
+              engine_status: engineStatus,
+              cost_code: siteInfo.cost_code,
+              fuel_percentage: fuelLevel,
+              notes: `${snapshotType} snapshot - ${engineStatus} - Fuel: ${fuelLevel}% (${fuelVolume}L)`,
+              captured_at: currentTime.toISOString()
+            }
           });
         
         if (insertError) throw new Error(`Insert error: ${insertError.message}`);

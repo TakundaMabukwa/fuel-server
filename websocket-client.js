@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
 const { supabase } = require('./supabase-client');
 const { detectFuelTheft } = require('./helpers/fuel-theft-detector');
+const { detectFuelFill } = require('./helpers/fuel-fill-detector');
 const axios = require('axios');
 
 class EnergyRiteWebSocketClient {
@@ -53,10 +54,24 @@ class EnergyRiteWebSocketClient {
   async processVehicleUpdate(vehicleData) {
     try {
       console.log(`📊 Processing vehicle data for ${vehicleData.Plate}:`, {
-        driverName: vehicleData.DriverName
+        driverName: vehicleData.DriverName,
+        fuelLevel: vehicleData.fuel_probe_1_level
       });
       
-      // Only process engine status changes
+      // Check for fuel fills first
+      if (vehicleData.fuel_probe_1_level) {
+        const fillResult = await detectFuelFill(
+          vehicleData.Plate, 
+          parseFloat(vehicleData.fuel_probe_1_level),
+          vehicleData.DriverName
+        );
+        
+        if (fillResult.isFill) {
+          await this.handleFuelFill(vehicleData.Plate, fillResult);
+        }
+      }
+      
+      // Process engine status changes
       const engineStatus = this.parseEngineStatus(vehicleData.DriverName);
       if (engineStatus) {
         await this.handleSessionChange(vehicleData.Plate, engineStatus);
@@ -93,6 +108,12 @@ class EnergyRiteWebSocketClient {
       console.log('🔍 DriverName received:', driverName, '-> normalized:', normalized);
     }
     
+    // Check for fuel fill status first
+    if (normalized.includes('POSSIBLE FUEL FILL') || 
+        normalized.includes('FUEL FILL')) {
+      return 'FUEL_FILL';
+    }
+    
     // Check for ON patterns (more comprehensive)
     if (normalized.includes('PTO ON') || 
         normalized.includes('ENGINE ON') ||
@@ -108,6 +129,42 @@ class EnergyRiteWebSocketClient {
         normalized.includes('IDLE')) return 'OFF';
     
     return null;
+  }
+
+  async handleFuelFill(plate, fillResult) {
+    try {
+      console.log(`⛽ Handling fuel fill for ${plate}:`, fillResult.fillDetails);
+      
+      // Update any ongoing session with fill information
+      const { data: ongoingSessions } = await supabase
+        .from('energy_rite_operating_sessions')
+        .select('*')
+        .eq('branch', plate)
+        .eq('session_status', 'ONGOING')
+        .order('session_start_time', { ascending: false })
+        .limit(1);
+        
+      if (ongoingSessions && ongoingSessions.length > 0) {
+        const session = ongoingSessions[0];
+        const currentFillEvents = session.fill_events || 0;
+        const currentFillAmount = session.fill_amount_during_session || 0;
+        
+        await supabase
+          .from('energy_rite_operating_sessions')
+          .update({
+            fill_events: currentFillEvents + 1,
+            fill_amount_during_session: currentFillAmount + fillResult.fillDetails.fillAmount,
+            total_fill: (session.total_fill || 0) + fillResult.fillDetails.fillAmount,
+            notes: `${session.notes || ''} | Fill: +${fillResult.fillDetails.fillAmount.toFixed(1)}L at ${new Date().toLocaleTimeString()}`
+          })
+          .eq('id', session.id);
+          
+        console.log(`🔋 Updated session ${session.id} with fill: +${fillResult.fillDetails.fillAmount.toFixed(1)}L`);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error handling fuel fill for ${plate}:`, error.message);
+    }
   }
 
   async handleSessionChange(plate, engineStatus) {
@@ -202,6 +259,13 @@ class EnergyRiteWebSocketClient {
             
 
         }
+      }
+      
+      // Handle fuel fill status
+      if (engineStatus === 'FUEL_FILL') {
+        console.log(`⛽ Fuel fill status detected for ${plate}`);
+        // The fuel fill detection is already handled in processVehicleUpdate
+        return;
       }
       
       // Log activity

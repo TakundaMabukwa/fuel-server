@@ -67,12 +67,13 @@ CREATE TABLE IF NOT EXISTS energy_rite_daily_reports (
 -- Create energy_rite_daily_snapshots table
 CREATE TABLE IF NOT EXISTS energy_rite_daily_snapshots (
     id BIGSERIAL PRIMARY KEY,
-    branch VARCHAR(100),
+    branch VARCHAR(100) NOT NULL,
     company VARCHAR(100),
-    snapshot_date DATE,
-    snapshot_data JSONB,
+    snapshot_date DATE NOT NULL,
+    snapshot_data JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(branch, snapshot_date)
 );
 
 -- Create energy_rite_activity_log table
@@ -231,6 +232,13 @@ CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON energy_rite_daily_reports(r
 
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_branch ON energy_rite_monthly_reports(branch);
 CREATE INDEX IF NOT EXISTS idx_monthly_reports_period ON energy_rite_monthly_reports(report_year, report_month);
+
+-- Create indexes for daily snapshots table
+CREATE INDEX IF NOT EXISTS idx_daily_snapshots_branch ON energy_rite_daily_snapshots(branch);
+CREATE INDEX IF NOT EXISTS idx_daily_snapshots_date ON energy_rite_daily_snapshots(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_daily_snapshots_company ON energy_rite_daily_snapshots(company);
+CREATE INDEX IF NOT EXISTS idx_daily_snapshots_branch_date ON energy_rite_daily_snapshots(branch, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_daily_snapshots_cost_code ON energy_rite_daily_snapshots USING GIN ((snapshot_data->>'cost_code'));
 
 CREATE INDEX IF NOT EXISTS idx_emails_status ON energyrite_emails(status);
 CREATE INDEX IF NOT EXISTS idx_emails_branch ON energyrite_emails(branch);

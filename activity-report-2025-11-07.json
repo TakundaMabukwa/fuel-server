@@ -1,0 +1,1120 @@
+{
+  "success": true,
+  "data": {
+    "date": "2025-11-07",
+    "cost_code": "All",
+    "summary": {
+      "total_sites": 35,
+      "total_sessions": 47,
+      "completed_sessions": 38,
+      "ongoing_sessions": 9,
+      "total_operating_hours": 25.340000000000003,
+      "total_fuel_usage": 6549.799999999999,
+      "total_fuel_filled": 0,
+      "total_cost": 129996
+    },
+    "sites": [
+      {
+        "branch": "BIRCHSOUTH",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "BIRCHSOUTH_2025-11-07T08:32:32.084+00:00",
+            "start_time": "2025-11-07T08:32:32.084+00:00",
+            "end_time": "2025-11-07T09:27:56.874+00:00",
+            "duration_hours": 0.92,
+            "opening_fuel": 127.8,
+            "closing_fuel": 122.6,
+            "fuel_usage": 5.2,
+            "fuel_filled": 0,
+            "cost": 104,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.92h, Opening: 127.8L, Closing: 122.6L, Used: 5.2L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.92,
+        "total_fuel_usage": 5.2,
+        "total_fuel_filled": 0,
+        "total_cost": 104,
+        "peak_usage_session": "2025-11-07T08:32:32.084+00:00",
+        "peak_usage_amount": 5.2
+      },
+      {
+        "branch": "BLOEM1",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "BLOEM1_2025-11-07T09:48:25.343+00:00",
+            "start_time": "2025-11-07T09:48:25.343+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 96.3,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 96.3L (41%)"
+          },
+          {
+            "id": "BLOEM1_2025-11-07T09:48:25.63+00:00",
+            "start_time": "2025-11-07T09:48:25.63+00:00",
+            "end_time": "2025-11-07T10:02:47.932+00:00",
+            "duration_hours": 0.24,
+            "opening_fuel": 96.2,
+            "closing_fuel": 95.7,
+            "fuel_usage": 0.5,
+            "fuel_filled": 0,
+            "cost": 10,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.24h, Opening: 96.2L, Closing: 95.7L, Used: 0.5L"
+          }
+        ],
+        "session_count": 2,
+        "total_operating_hours": 0.24,
+        "total_fuel_usage": 0.5,
+        "total_fuel_filled": 0,
+        "total_cost": 10,
+        "peak_usage_session": "2025-11-07T09:48:25.63+00:00",
+        "peak_usage_amount": 0.5
+      },
+      {
+        "branch": "BLUE HILL",
+        "company": "Gunret",
+        "cost_code": "KFC-0001-0001-0002-0004",
+        "sessions": [
+          {
+            "id": "BLUE HILL_2025-11-07T05:48:11.714+00:00",
+            "start_time": "2025-11-07T05:48:11.714+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 305.6,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 305.6L (100%)"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "BLUEVALLEY",
+        "company": "Gunret",
+        "cost_code": "KFC-0001-0001-0002-0003",
+        "sessions": [
+          {
+            "id": "BLUEVALLEY_2025-11-07T08:54:51.76+00:00",
+            "start_time": "2025-11-07T08:54:51.76+00:00",
+            "end_time": "2025-11-07T09:00:42.883+00:00",
+            "duration_hours": 0.1,
+            "opening_fuel": 256.6,
+            "closing_fuel": 256.4,
+            "fuel_usage": 0.2,
+            "fuel_filled": 0,
+            "cost": 4,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.10h, Opening: 256.6L, Closing: 256.4L, Used: 0.2L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.1,
+        "total_fuel_usage": 0.2,
+        "total_fuel_filled": 0,
+        "total_cost": 4,
+        "peak_usage_session": "2025-11-07T08:54:51.76+00:00",
+        "peak_usage_amount": 0.2
+      },
+      {
+        "branch": "CARLTONV 2",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "CARLTONV 2_2025-11-07T10:49:08.175+00:00",
+            "start_time": "2025-11-07T10:49:08.175+00:00",
+            "end_time": "2025-11-07T10:53:23.288+00:00",
+            "duration_hours": 0.07,
+            "opening_fuel": 99.7,
+            "closing_fuel": 99.7,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.07h, Opening: 99.7L, Closing: 99.7L, Used: 0.0L"
+          },
+          {
+            "id": "CARLTONV 2_2025-11-07T11:03:47.919+00:00",
+            "start_time": "2025-11-07T11:03:47.919+00:00",
+            "end_time": "2025-11-07T11:28:09.133+00:00",
+            "duration_hours": 0.41,
+            "opening_fuel": 99.7,
+            "closing_fuel": 99.1,
+            "fuel_usage": 0.6,
+            "fuel_filled": 0,
+            "cost": 12,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.41h, Opening: 99.7L, Closing: 99.1L, Used: 0.6L"
+          }
+        ],
+        "session_count": 2,
+        "total_operating_hours": 0.48,
+        "total_fuel_usage": 0.6,
+        "total_fuel_filled": 0,
+        "total_cost": 12,
+        "peak_usage_session": "2025-11-07T11:03:47.919+00:00",
+        "peak_usage_amount": 0.6
+      },
+      {
+        "branch": "CARLTONVIL",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "CARLTONVIL_2025-11-07T05:53:05.338+00:00",
+            "start_time": "2025-11-07T05:53:05.338+00:00",
+            "end_time": "2025-11-07T06:03:37.442+00:00",
+            "duration_hours": 0.18,
+            "opening_fuel": 128.6,
+            "closing_fuel": 128,
+            "fuel_usage": 0.6,
+            "fuel_filled": 0,
+            "cost": 12,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.18h, Opening: 128.6L, Closing: 128L, Used: 0.6L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.18,
+        "total_fuel_usage": 0.6,
+        "total_fuel_filled": 0,
+        "total_cost": 12,
+        "peak_usage_session": "2025-11-07T05:53:05.338+00:00",
+        "peak_usage_amount": 0.6
+      },
+      {
+        "branch": "ELDORADO",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "ELDORADO_2025-11-07T08:59:10.109+00:00",
+            "start_time": "2025-11-07T08:59:10.109+00:00",
+            "end_time": "2025-11-07T09:37:44.841+00:00",
+            "duration_hours": 0.64,
+            "opening_fuel": 165,
+            "closing_fuel": 163.4,
+            "fuel_usage": 1.6,
+            "fuel_filled": 0,
+            "cost": 32,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.64h, Opening: 165L, Closing: 163.4L, Used: 1.6L"
+          },
+          {
+            "id": "ELDORADO_2025-11-07T12:38:13.24+00:00",
+            "start_time": "2025-11-07T12:38:13.24+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 163.4,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 163.4L (70%)"
+          },
+          {
+            "id": "ELDORADO_2025-11-07T12:38:13.389+00:00",
+            "start_time": "2025-11-07T12:38:13.389+00:00",
+            "end_time": "2025-11-07T13:02:58.379+00:00",
+            "duration_hours": 0.41,
+            "opening_fuel": 163.4,
+            "closing_fuel": 161.7,
+            "fuel_usage": 1.7,
+            "fuel_filled": 0,
+            "cost": 34,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.41h, Opening: 163.4L, Closing: 161.7L, Used: 1.7L"
+          }
+        ],
+        "session_count": 3,
+        "total_operating_hours": 1.05,
+        "total_fuel_usage": 3.3,
+        "total_fuel_filled": 0,
+        "total_cost": 66,
+        "peak_usage_session": "2025-11-07T12:38:13.389+00:00",
+        "peak_usage_amount": 1.7
+      },
+      {
+        "branch": "GLENMARAIS",
+        "company": "KFC",
+        "cost_code": null,
+        "sessions": [
+          {
+            "id": "GLENMARAIS_2025-11-07T08:10:07.863+00:00",
+            "start_time": "2025-11-07T08:10:07.863+00:00",
+            "end_time": "2025-11-07T08:52:48.913+00:00",
+            "duration_hours": 0.71,
+            "opening_fuel": 255.1,
+            "closing_fuel": 254.7,
+            "fuel_usage": 0.4,
+            "fuel_filled": 0,
+            "cost": 8,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.71h, Opening: 255.1L, Closing: 254.7L, Used: 0.4L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.71,
+        "total_fuel_usage": 0.4,
+        "total_fuel_filled": 0,
+        "total_cost": 8,
+        "peak_usage_session": "2025-11-07T08:10:07.863+00:00",
+        "peak_usage_amount": 0.4
+      },
+      {
+        "branch": "GRAYSTON",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "GRAYSTON_2025-11-07T08:15:24.484+00:00",
+            "start_time": "2025-11-07T08:15:24.484+00:00",
+            "end_time": "2025-11-07T08:30:50.552+00:00",
+            "duration_hours": 0.26,
+            "opening_fuel": 149.9,
+            "closing_fuel": 148.2,
+            "fuel_usage": 1.7,
+            "fuel_filled": 0,
+            "cost": 34,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.26h, Opening: 149.9L, Closing: 148.2L, Used: 1.7L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.26,
+        "total_fuel_usage": 1.7,
+        "total_fuel_filled": 0,
+        "total_cost": 34,
+        "peak_usage_session": "2025-11-07T08:15:24.484+00:00",
+        "peak_usage_amount": 1.7
+      },
+      {
+        "branch": "JANSENPARK",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "JANSENPARK_2025-11-07T13:46:13.494+00:00",
+            "start_time": "2025-11-07T13:46:13.494+00:00",
+            "end_time": "2025-11-07T14:17:41.317+00:00",
+            "duration_hours": 0.52,
+            "opening_fuel": 261.8,
+            "closing_fuel": 259.4,
+            "fuel_usage": 2.4,
+            "fuel_filled": 0,
+            "cost": 48,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.52h, Opening: 261.8L, Closing: 259.4L, Used: 2.4L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.52,
+        "total_fuel_usage": 2.4,
+        "total_fuel_filled": 0,
+        "total_cost": 48,
+        "peak_usage_session": "2025-11-07T13:46:13.494+00:00",
+        "peak_usage_amount": 2.4
+      },
+      {
+        "branch": "KBY WEST",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "KBY WEST_2025-11-07T08:32:01.401+00:00",
+            "start_time": "2025-11-07T08:32:01.401+00:00",
+            "end_time": "2025-11-07T09:04:59.832+00:00",
+            "duration_hours": 0.55,
+            "opening_fuel": 225.2,
+            "closing_fuel": 224.2,
+            "fuel_usage": 1,
+            "fuel_filled": 0,
+            "cost": 20,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.55h, Opening: 225.2L, Closing: 224.2L, Used: 1.0L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.55,
+        "total_fuel_usage": 1,
+        "total_fuel_filled": 0,
+        "total_cost": 20,
+        "peak_usage_session": "2025-11-07T08:32:01.401+00:00",
+        "peak_usage_amount": 1
+      },
+      {
+        "branch": "KEYWEST",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "KEYWEST_2025-11-07T09:58:00.368+00:00",
+            "start_time": "2025-11-07T09:58:00.368+00:00",
+            "end_time": "2025-11-07T10:00:33.067+00:00",
+            "duration_hours": 0.04,
+            "opening_fuel": 123.6,
+            "closing_fuel": 123.6,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.04h, Opening: 123.6L, Closing: 123.6L, Used: 0.0L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.04,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "KIMBERLEY3",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "KIMBERLEY3_2025-11-07T05:16:17.7+00:00",
+            "start_time": "2025-11-07T05:16:17.7+00:00",
+            "end_time": "2025-11-07T05:35:35.879+00:00",
+            "duration_hours": 0.32,
+            "opening_fuel": 243.7,
+            "closing_fuel": 280,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.32h, Opening: 243.7L, Closing: 280L, Used: 0.0L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.32,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "KROONSTAD",
+        "company": "KFC",
+        "cost_code": null,
+        "sessions": [
+          {
+            "id": "KROONSTAD_2025-11-07T12:32:24.145+00:00",
+            "start_time": "2025-11-07T12:32:24.145+00:00",
+            "end_time": "2025-11-07T13:35:57.258+00:00",
+            "duration_hours": 1.06,
+            "opening_fuel": 143.3,
+            "closing_fuel": 143.3,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 1.06h, Opening: 143.3L, Closing: 143.3L, Used: 0.0L"
+          },
+          {
+            "id": "KROONSTAD_2025-11-07T12:32:24.381+00:00",
+            "start_time": "2025-11-07T12:32:24.381+00:00",
+            "end_time": "2025-11-07T12:32:54.768+00:00",
+            "duration_hours": 0.01,
+            "opening_fuel": 143.3,
+            "closing_fuel": 143.3,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.01h, Opening: 143.3L, Closing: 143.3L, Used: 0.0L"
+          }
+        ],
+        "session_count": 2,
+        "total_operating_hours": 1.07,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "KRUGERSDOR",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "KRUGERSDOR_2025-11-07T10:54:24.457+00:00",
+            "start_time": "2025-11-07T10:54:24.457+00:00",
+            "end_time": "2025-11-07T11:34:48.407+00:00",
+            "duration_hours": 0.67,
+            "opening_fuel": 219.9,
+            "closing_fuel": 213.7,
+            "fuel_usage": 6.2,
+            "fuel_filled": 0,
+            "cost": 124,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.67h, Opening: 219.9L, Closing: 213.7L, Used: 6.2L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.67,
+        "total_fuel_usage": 6.2,
+        "total_fuel_filled": 0,
+        "total_cost": 124,
+        "peak_usage_session": "2025-11-07T10:54:24.457+00:00",
+        "peak_usage_amount": 6.2
+      },
+      {
+        "branch": "LAMBTON",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "LAMBTON_2025-11-07T06:34:10.365+00:00",
+            "start_time": "2025-11-07T06:34:10.365+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 165,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 165L (56%)"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "LANGENHOVE",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "LANGENHOVE_2025-11-07T09:48:23.601+00:00",
+            "start_time": "2025-11-07T09:48:23.601+00:00",
+            "end_time": "2025-11-07T10:26:42.682+00:00",
+            "duration_hours": 0.64,
+            "opening_fuel": 54.9,
+            "closing_fuel": 52.7,
+            "fuel_usage": 2.2,
+            "fuel_filled": 0,
+            "cost": 44,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.64h, Opening: 54.9L, Closing: 52.7L, Used: 2.2L"
+          },
+          {
+            "id": "LANGENHOVE_2025-11-07T12:30:42.442+00:00",
+            "start_time": "2025-11-07T12:30:42.442+00:00",
+            "end_time": "2025-11-07T13:43:04.372+00:00",
+            "duration_hours": 1.21,
+            "opening_fuel": 53.5,
+            "closing_fuel": 45.6,
+            "fuel_usage": 7.9,
+            "fuel_filled": 0,
+            "cost": 158,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 1.21h, Opening: 53.5L, Closing: 45.6L, Used: 7.9L"
+          },
+          {
+            "id": "LANGENHOVE_2025-11-07T12:30:42.62+00:00",
+            "start_time": "2025-11-07T12:30:42.62+00:00",
+            "end_time": "2025-11-07T12:31:22.795+00:00",
+            "duration_hours": 0.01,
+            "opening_fuel": 53.5,
+            "closing_fuel": 53.5,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.01h, Opening: 53.5L, Closing: 53.5L, Used: 0.0L"
+          },
+          {
+            "id": "LANGENHOVE_2025-11-07T13:45:42.256+00:00",
+            "start_time": "2025-11-07T13:45:42.256+00:00",
+            "end_time": "2025-11-07T14:48:47.492+00:00",
+            "duration_hours": 1.05,
+            "opening_fuel": 71,
+            "closing_fuel": 63.2,
+            "fuel_usage": 7.8,
+            "fuel_filled": 0,
+            "cost": 156,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 1.05h, Opening: 71L, Closing: 63.2L, Used: 7.8L"
+          }
+        ],
+        "session_count": 4,
+        "total_operating_hours": 2.91,
+        "total_fuel_usage": 17.900000000000002,
+        "total_fuel_filled": 0,
+        "total_cost": 358,
+        "peak_usage_session": "2025-11-07T12:30:42.442+00:00",
+        "peak_usage_amount": 7.9
+      },
+      {
+        "branch": "MARLBORO",
+        "company": "Gunret",
+        "cost_code": "KFC-0001-0001-0002-0004",
+        "sessions": [
+          {
+            "id": "MARLBORO_2025-11-07T10:35:09.916+00:00",
+            "start_time": "2025-11-07T10:35:09.916+00:00",
+            "end_time": "2025-11-07T10:35:40.698+00:00",
+            "duration_hours": 0.01,
+            "opening_fuel": 216.7,
+            "closing_fuel": 216.7,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.01h, Opening: 216.7L, Closing: 216.7L, Used: 0.0L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.01,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "MEADOWDALE",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "MEADOWDALE_2025-11-07T10:34:39.335+00:00",
+            "start_time": "2025-11-07T10:34:39.335+00:00",
+            "end_time": "2025-11-07T11:09:45.06+00:00",
+            "duration_hours": 0.58,
+            "opening_fuel": 234.6,
+            "closing_fuel": 232.7,
+            "fuel_usage": 1.9,
+            "fuel_filled": 0,
+            "cost": 38,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.58h, Opening: 234.6L, Closing: 232.7L, Used: 1.9L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.58,
+        "total_fuel_usage": 1.9,
+        "total_fuel_filled": 0,
+        "total_cost": 38,
+        "peak_usage_session": "2025-11-07T10:34:39.335+00:00",
+        "peak_usage_amount": 1.9
+      },
+      {
+        "branch": "MONUMENT",
+        "company": "KFC",
+        "cost_code": null,
+        "sessions": [
+          {
+            "id": "MONUMENT_2025-11-07T08:38:25.383+00:00",
+            "start_time": "2025-11-07T08:38:25.383+00:00",
+            "end_time": "2025-11-07T08:52:48.895+00:00",
+            "duration_hours": 0.24,
+            "opening_fuel": 99,
+            "closing_fuel": 98.3,
+            "fuel_usage": 0.7,
+            "fuel_filled": 0,
+            "cost": 14,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.24h, Opening: 99L, Closing: 98.3L, Used: 0.7L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.24,
+        "total_fuel_usage": 0.7,
+        "total_fuel_filled": 0,
+        "total_cost": 14,
+        "peak_usage_session": "2025-11-07T08:38:25.383+00:00",
+        "peak_usage_amount": 0.7
+      },
+      {
+        "branch": "NEW MARKET",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "NEW MARKET_2025-11-07T06:52:08.408+00:00",
+            "start_time": "2025-11-07T06:52:08.408+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 190.5,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 190.5L (70%)"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "NOORDHEUW",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "NOORDHEUW_2025-11-07T13:12:01.167+00:00",
+            "start_time": "2025-11-07T13:12:01.167+00:00",
+            "end_time": "2025-11-07T14:48:16.982+00:00",
+            "duration_hours": 1.6,
+            "opening_fuel": 6553.5,
+            "closing_fuel": 113.1,
+            "fuel_usage": 6440.4,
+            "fuel_filled": 0,
+            "cost": 128808,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 1.60h, Opening: 6553.5L, Closing: 113.1L, Used: 6440.4L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 1.6,
+        "total_fuel_usage": 6440.4,
+        "total_fuel_filled": 0,
+        "total_cost": 128808,
+        "peak_usage_session": "2025-11-07T13:12:01.167+00:00",
+        "peak_usage_amount": 6440.4
+      },
+      {
+        "branch": "PHOKENG",
+        "company": "Gunret",
+        "cost_code": "KFC-0001-0001-0002-0001-0002",
+        "sessions": [
+          {
+            "id": "PHOKENG_2025-11-07T12:55:18.225+00:00",
+            "start_time": "2025-11-07T12:55:18.225+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 224.7,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 224.7L (74%)"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "RANDBURG",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "RANDBURG_2025-11-07T07:56:21.841+00:00",
+            "start_time": "2025-11-07T07:56:21.841+00:00",
+            "end_time": "2025-11-07T08:27:35.539+00:00",
+            "duration_hours": 0.52,
+            "opening_fuel": 180.6,
+            "closing_fuel": 178.1,
+            "fuel_usage": 2.5,
+            "fuel_filled": 0,
+            "cost": 50,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.52h, Opening: 180.6L, Closing: 178.1L, Used: 2.5L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.52,
+        "total_fuel_usage": 2.5,
+        "total_fuel_filled": 0,
+        "total_cost": 50,
+        "peak_usage_session": "2025-11-07T07:56:21.841+00:00",
+        "peak_usage_amount": 2.5
+      },
+      {
+        "branch": "RANDFONTEI",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "RANDFONTEI_2025-11-07T09:53:13.972+00:00",
+            "start_time": "2025-11-07T09:53:13.972+00:00",
+            "end_time": "2025-11-07T09:55:47.339+00:00",
+            "duration_hours": 0.04,
+            "opening_fuel": 91.8,
+            "closing_fuel": 91,
+            "fuel_usage": 0.8,
+            "fuel_filled": 0,
+            "cost": 16,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.04h, Opening: 91.8L, Closing: 91L, Used: 0.8L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.04,
+        "total_fuel_usage": 0.8,
+        "total_fuel_filled": 0,
+        "total_cost": 16,
+        "peak_usage_session": "2025-11-07T09:53:13.972+00:00",
+        "peak_usage_amount": 0.8
+      },
+      {
+        "branch": "RIVONIA",
+        "company": "KFC",
+        "cost_code": null,
+        "sessions": [
+          {
+            "id": "RIVONIA_2025-11-07T13:47:24.58+00:00",
+            "start_time": "2025-11-07T13:47:24.58+00:00",
+            "end_time": "2025-11-07T13:56:36.987+00:00",
+            "duration_hours": 0.15,
+            "opening_fuel": 292,
+            "closing_fuel": 291.5,
+            "fuel_usage": 0.5,
+            "fuel_filled": 0,
+            "cost": 10,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.15h, Opening: 292L, Closing: 291.5L, Used: 0.5L"
+          },
+          {
+            "id": "RIVONIA_2025-11-07T13:47:24.59+00:00",
+            "start_time": "2025-11-07T13:47:24.59+00:00",
+            "end_time": "2025-11-07T13:55:56.113+00:00",
+            "duration_hours": 0.14,
+            "opening_fuel": 292,
+            "closing_fuel": 291.5,
+            "fuel_usage": 0.5,
+            "fuel_filled": 0,
+            "cost": 10,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.14h, Opening: 292L, Closing: 291.5L, Used: 0.5L"
+          }
+        ],
+        "session_count": 2,
+        "total_operating_hours": 0.29000000000000004,
+        "total_fuel_usage": 1,
+        "total_fuel_filled": 0,
+        "total_cost": 20,
+        "peak_usage_session": "2025-11-07T13:47:24.58+00:00",
+        "peak_usage_amount": 0.5
+      },
+      {
+        "branch": "SITE-B",
+        "company": null,
+        "cost_code": "KFC-SITE-B-001",
+        "sessions": [
+          {
+            "id": "SITE-B_2025-11-07T08:26:43.784+00:00",
+            "start_time": "2025-11-07T08:26:43.784+00:00",
+            "end_time": "2025-11-07T12:26:43.784+00:00",
+            "duration_hours": 4,
+            "opening_fuel": 0,
+            "closing_fuel": 0,
+            "fuel_usage": 25,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": null
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 4,
+        "total_fuel_usage": 25,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": "2025-11-07T08:26:43.784+00:00",
+        "peak_usage_amount": 25
+      },
+      {
+        "branch": "SITE-C",
+        "company": null,
+        "cost_code": "KFC-SITE-C-001",
+        "sessions": [
+          {
+            "id": "SITE-C_2025-11-07T08:26:44.269+00:00",
+            "start_time": "2025-11-07T08:26:44.269+00:00",
+            "end_time": "2025-11-07T12:26:44.269+00:00",
+            "duration_hours": 4,
+            "opening_fuel": 0,
+            "closing_fuel": 0,
+            "fuel_usage": 25,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "COMPLETED",
+            "notes": null
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 4,
+        "total_fuel_usage": 25,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": "2025-11-07T08:26:44.269+00:00",
+        "peak_usage_amount": 25
+      },
+      {
+        "branch": "SPRINGS",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "SPRINGS_2025-11-07T02:23:53.004+00:00",
+            "start_time": "2025-11-07T02:23:53.004+00:00",
+            "end_time": "2025-11-07T02:55:55.823+00:00",
+            "duration_hours": 0.53,
+            "opening_fuel": 153.7,
+            "closing_fuel": 153,
+            "fuel_usage": 0.7,
+            "fuel_filled": 0,
+            "cost": 14,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.53h, Opening: 153.7L, Closing: 153L, Used: 0.7L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.53,
+        "total_fuel_usage": 0.7,
+        "total_fuel_filled": 0,
+        "total_cost": 14,
+        "peak_usage_session": "2025-11-07T02:23:53.004+00:00",
+        "peak_usage_amount": 0.7
+      },
+      {
+        "branch": "SUNWARD",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "SUNWARD_2025-11-07T14:51:26.427+00:00",
+            "start_time": "2025-11-07T14:51:26.427+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 224.3,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 224.3L (88%)"
+          },
+          {
+            "id": "SUNWARD_2025-11-07T14:51:27.219+00:00",
+            "start_time": "2025-11-07T14:51:27.219+00:00",
+            "end_time": "2025-11-07T14:51:57.401+00:00",
+            "duration_hours": 0.01,
+            "opening_fuel": 224.3,
+            "closing_fuel": 222.5,
+            "fuel_usage": 1.8,
+            "fuel_filled": 0,
+            "cost": 36,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.01h, Opening: 224.3L, Closing: 222.5L, Used: 1.8L"
+          }
+        ],
+        "session_count": 2,
+        "total_operating_hours": 0.01,
+        "total_fuel_usage": 1.8,
+        "total_fuel_filled": 0,
+        "total_cost": 36,
+        "peak_usage_session": "2025-11-07T14:51:27.219+00:00",
+        "peak_usage_amount": 1.8
+      },
+      {
+        "branch": "TAMBOTIE",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "TAMBOTIE_2025-11-07T06:09:25.741+00:00",
+            "start_time": "2025-11-07T06:09:25.741+00:00",
+            "end_time": "2025-11-07T06:42:39.483+00:00",
+            "duration_hours": 0.55,
+            "opening_fuel": 230.6,
+            "closing_fuel": 229.2,
+            "fuel_usage": 1.4,
+            "fuel_filled": 0,
+            "cost": 28,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.55h, Opening: 230.6L, Closing: 229.2L, Used: 1.4L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.55,
+        "total_fuel_usage": 1.4,
+        "total_fuel_filled": 0,
+        "total_cost": 28,
+        "peak_usage_session": "2025-11-07T06:09:25.741+00:00",
+        "peak_usage_amount": 1.4
+      },
+      {
+        "branch": "THE WEDGE",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "THE WEDGE_2025-11-07T06:55:13.823+00:00",
+            "start_time": "2025-11-07T06:55:13.823+00:00",
+            "end_time": "2025-11-07T07:27:22.888+00:00",
+            "duration_hours": 0.54,
+            "opening_fuel": 103.8,
+            "closing_fuel": 103.1,
+            "fuel_usage": 0.7,
+            "fuel_filled": 0,
+            "cost": 14,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.54h, Opening: 103.8L, Closing: 103.1L, Used: 0.7L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.54,
+        "total_fuel_usage": 0.7,
+        "total_fuel_filled": 0,
+        "total_cost": 14,
+        "peak_usage_session": "2025-11-07T06:55:13.823+00:00",
+        "peak_usage_amount": 0.7
+      },
+      {
+        "branch": "WELKOM",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "WELKOM_2025-11-07T09:52:11.601+00:00",
+            "start_time": "2025-11-07T09:52:11.601+00:00",
+            "end_time": "2025-11-07T10:03:50.088+00:00",
+            "duration_hours": 0.19,
+            "opening_fuel": 160.8,
+            "closing_fuel": 159.4,
+            "fuel_usage": 1.4,
+            "fuel_filled": 0,
+            "cost": 28,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.19h, Opening: 160.8L, Closing: 159.4L, Used: 1.4L"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0.19,
+        "total_fuel_usage": 1.4,
+        "total_fuel_filled": 0,
+        "total_cost": 28,
+        "peak_usage_session": "2025-11-07T09:52:11.601+00:00",
+        "peak_usage_amount": 1.4
+      },
+      {
+        "branch": "WESTONARIA",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "WESTONARIA_2025-11-07T10:45:33.253+00:00",
+            "start_time": "2025-11-07T10:45:33.253+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 241.8,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 241.8L (98%)"
+          }
+        ],
+        "session_count": 1,
+        "total_operating_hours": 0,
+        "total_fuel_usage": 0,
+        "total_fuel_filled": 0,
+        "total_cost": 0,
+        "peak_usage_session": null,
+        "peak_usage_amount": 0
+      },
+      {
+        "branch": "WILLOW",
+        "company": "YUM Equity",
+        "cost_code": "KFC-0001-0001-0003",
+        "sessions": [
+          {
+            "id": "WILLOW_2025-11-07T09:37:11.547+00:00",
+            "start_time": "2025-11-07T09:37:11.547+00:00",
+            "end_time": "2025-11-07T10:01:05.04+00:00",
+            "duration_hours": 0.4,
+            "opening_fuel": 177.1,
+            "closing_fuel": 175.7,
+            "fuel_usage": 1.4,
+            "fuel_filled": 0,
+            "cost": 28,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 0.40h, Opening: 177.1L, Closing: 175.7L, Used: 1.4L"
+          },
+          {
+            "id": "WILLOW_2025-11-07T12:30:42.456+00:00",
+            "start_time": "2025-11-07T12:30:42.456+00:00",
+            "end_time": null,
+            "duration_hours": 0,
+            "opening_fuel": 177.9,
+            "closing_fuel": 0,
+            "fuel_usage": 0,
+            "fuel_filled": 0,
+            "cost": 0,
+            "status": "ONGOING",
+            "notes": "Engine started. Opening: 177.9L (67%)"
+          },
+          {
+            "id": "WILLOW_2025-11-07T12:30:42.621+00:00",
+            "start_time": "2025-11-07T12:30:42.621+00:00",
+            "end_time": "2025-11-07T14:19:56.084+00:00",
+            "duration_hours": 1.82,
+            "opening_fuel": 177.9,
+            "closing_fuel": 172.8,
+            "fuel_usage": 5.1,
+            "fuel_filled": 0,
+            "cost": 102,
+            "status": "COMPLETED",
+            "notes": "Engine stopped. Duration: 1.82h, Opening: 177.9L, Closing: 172.8L, Used: 5.1L"
+          }
+        ],
+        "session_count": 3,
+        "total_operating_hours": 2.22,
+        "total_fuel_usage": 6.5,
+        "total_fuel_filled": 0,
+        "total_cost": 130,
+        "peak_usage_session": "2025-11-07T12:30:42.621+00:00",
+        "peak_usage_amount": 5.1
+      }
+    ]
+  }
+}

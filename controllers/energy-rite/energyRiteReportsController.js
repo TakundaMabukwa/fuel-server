@@ -1,5 +1,310 @@
 const { supabase } = require('../../supabase-client');
 
+// Helper function to calculate fuel usage between periods
+async function calculatePeriodFuelUsage(targetDate, accessibleCostCodes = [], specificPeriod = null) {
+  try {
+    console.log(`⛽ Calculating period fuel usage for ${targetDate}`);
+
+    // Build base query for all snapshots on target date
+    let query = supabase
+      .from('energy_rite_daily_snapshots')
+      .select('*')
+      .eq('snapshot_date', targetDate);
+
+    // Apply cost code filters if provided
+    if (accessibleCostCodes.length > 0) {
+      if (accessibleCostCodes.length === 1) {
+        query = query.eq('snapshot_data->>cost_code', accessibleCostCodes[0]);
+      } else {
+        query = query.in('snapshot_data->>cost_code', accessibleCostCodes);
+      }
+    }
+
+    query = query.order('snapshot_time', { ascending: true });
+
+    const { data: allSnapshots, error } = await query;
+
+    if (error) {
+      throw new Error(`Error fetching snapshots for fuel usage: ${error.message}`);
+    }
+
+    // Group snapshots by vehicle/site and snapshot type
+    const snapshotsByVehicle = {};
+    allSnapshots.forEach(snapshot => {
+      const vehicleKey = snapshot.branch;
+      const snapshotType = snapshot.snapshot_type;
+      const snapshotData = snapshot.snapshot_data || {};
+
+      if (!snapshotsByVehicle[vehicleKey]) {
+        snapshotsByVehicle[vehicleKey] = {
+          vehicle: vehicleKey,
+          cost_code: snapshotData.cost_code,
+          company: snapshot.company,
+          snapshots: {},
+          fuel_usage: {}
+        };
+      }
+
+      snapshotsByVehicle[vehicleKey].snapshots[snapshotType] = {
+        fuel_volume: snapshotData.fuel_volume || 0,
+        fuel_level: snapshotData.fuel_level || 0,
+        engine_status: snapshotData.engine_status || 'UNKNOWN',
+        snapshot_time: snapshot.snapshot_time
+      };
+    });
+
+    // Calculate fuel usage for each period
+    const periodDefinitions = [
+      { name: 'MORNING', start: 'NIGHT', end: 'MORNING' },     // Night to Morning
+      { name: 'MIDDAY', start: 'MORNING', end: 'MIDDAY' },    // Morning to Midday  
+      { name: 'EVENING', start: 'MIDDAY', end: 'EVENING' }    // Midday to Evening
+    ];
+
+    const fuelUsageByPeriod = {};
+    const fuelUsageByCostCode = {};
+    let totalFuelUsed = 0;
+
+    // Calculate for each period or specific period
+    const periodsToCalculate = specificPeriod ? 
+      periodDefinitions.filter(p => p.name === specificPeriod) : 
+      periodDefinitions;
+
+    periodsToCalculate.forEach(period => {
+      fuelUsageByPeriod[period.name] = {
+        period_name: period.name,
+        start_snapshot: period.start,
+        end_snapshot: period.end,
+        vehicles: [],
+        total_fuel_used: 0,
+        cost_centers: {}
+      };
+
+      Object.values(snapshotsByVehicle).forEach(vehicleData => {
+        const startSnapshot = vehicleData.snapshots[period.start];
+        const endSnapshot = vehicleData.snapshots[period.end];
+
+        if (startSnapshot && endSnapshot) {
+          // Calculate fuel consumption (start volume - end volume)
+          const fuelUsed = Math.max(0, startSnapshot.fuel_volume - endSnapshot.fuel_volume);
+          
+          const vehicleUsage = {
+            vehicle: vehicleData.vehicle,
+            cost_code: vehicleData.cost_code,
+            company: vehicleData.company,
+            start_fuel_volume: startSnapshot.fuel_volume,
+            end_fuel_volume: endSnapshot.fuel_volume,
+            fuel_used: fuelUsed,
+            start_fuel_level: startSnapshot.fuel_level,
+            end_fuel_level: endSnapshot.fuel_level,
+            start_time: startSnapshot.snapshot_time,
+            end_time: endSnapshot.snapshot_time,
+            engine_status_start: startSnapshot.engine_status,
+            engine_status_end: endSnapshot.engine_status
+          };
+
+          fuelUsageByPeriod[period.name].vehicles.push(vehicleUsage);
+          fuelUsageByPeriod[period.name].total_fuel_used += fuelUsed;
+          totalFuelUsed += fuelUsed;
+
+          // Group by cost code
+          const costCode = vehicleData.cost_code || 'NO_COST_CODE';
+          if (!fuelUsageByPeriod[period.name].cost_centers[costCode]) {
+            fuelUsageByPeriod[period.name].cost_centers[costCode] = {
+              cost_code: vehicleData.cost_code,
+              vehicles: [],
+              total_fuel_used: 0
+            };
+          }
+          fuelUsageByPeriod[period.name].cost_centers[costCode].vehicles.push(vehicleUsage);
+          fuelUsageByPeriod[period.name].cost_centers[costCode].total_fuel_used += fuelUsed;
+
+          // Overall cost code summary
+          if (!fuelUsageByCostCode[costCode]) {
+            fuelUsageByCostCode[costCode] = {
+              cost_code: vehicleData.cost_code,
+              total_fuel_used: 0,
+              periods: {},
+              vehicles: new Set()
+            };
+          }
+          fuelUsageByCostCode[costCode].total_fuel_used += fuelUsed;
+          fuelUsageByCostCode[costCode].periods[period.name] = 
+            (fuelUsageByCostCode[costCode].periods[period.name] || 0) + fuelUsed;
+          fuelUsageByCostCode[costCode].vehicles.add(vehicleData.vehicle);
+        }
+      });
+
+      // Convert cost centers object to array
+      fuelUsageByPeriod[period.name].cost_centers = Object.values(fuelUsageByPeriod[period.name].cost_centers);
+    });
+
+    // Convert sets to arrays in cost code summary
+    Object.values(fuelUsageByCostCode).forEach(costCodeData => {
+      costCodeData.vehicles = Array.from(costCodeData.vehicles);
+    });
+
+    return {
+      date: targetDate,
+      specific_period: specificPeriod,
+      total_fuel_used: parseFloat(totalFuelUsed.toFixed(2)),
+      periods: Object.values(fuelUsageByPeriod),
+      cost_code_summary: Object.values(fuelUsageByCostCode),
+      calculation_method: 'Start fuel volume - End fuel volume per period',
+      period_definitions: 'MORNING (Night→Morning), MIDDAY (Morning→Midday), EVENING (Midday→Evening)'
+    };
+
+  } catch (error) {
+    console.error('❌ Error calculating fuel usage:', error);
+    return {
+      error: 'Failed to calculate fuel usage',
+      message: error.message
+    };
+  }
+}
+
+// Calculate fuel usage across 3 shifts: Night (00:00-08:00), Day (08:00-16:00), Evening (16:00-00:00)
+async function calculateShiftFuelUsage(targetDate, fuelData, cost_code, site_id) {
+  try {
+    // Define the 3 shift periods
+    const shifts = {
+      night_shift: {
+        name: 'Night Shift',
+        start: '00:00:00',
+        end: '08:00:00',
+        period: '00:00 - 08:00',
+        start_hour: 0,
+        end_hour: 8
+      },
+      day_shift: {
+        name: 'Day Shift', 
+        start: '08:00:00',
+        end: '16:00:00',
+        period: '08:00 - 16:00',
+        start_hour: 8,
+        end_hour: 16
+      },
+      evening_shift: {
+        name: 'Evening Shift',
+        start: '16:00:00', 
+        end: '23:59:59',
+        period: '16:00 - 00:00',
+        start_hour: 16,
+        end_hour: 24
+      }
+    };
+
+    // Get current site data using the existing snapshot system (no vehicles table needed)
+    console.log('📊 Using snapshot-based shift fuel tracking');
+    
+    // Use existing time period snapshots for shift calculation 
+    const timePeriodsData = await getTimePeriodSnapshots(targetDate, cost_code, site_id);
+    
+    return calculateShiftUsageFromSnapshots(timePeriodsData, null);
+
+  } catch (error) {
+    console.error('Error calculating shift fuel usage:', error);
+    return {
+      error: 'Failed to calculate shift fuel usage',
+      message: error.message,
+      summary: { total_daily_usage: 0, total_daily_cost: 0, vehicle_count: 0 },
+      shifts: {},
+      vehicle_details: {}
+    };
+  }
+}
+
+// Helper function to get time period snapshots for shift calculation
+async function getTimePeriodSnapshots(targetDate, cost_code, site_id) {
+  const { supabase } = require('../../supabase-client');
+  
+  // Get the existing time period data that's already calculated in getActivityReport
+  const periods = ['morning', 'afternoon', 'evening'];
+  const snapshotData = {};
+  
+  for (const period of periods) {
+    // Get snapshot data for this period
+    const { data, error } = await supabase
+      .from('energy_rite_daily_snapshots')
+      .select('*')
+      .eq('snapshot_date', targetDate)
+      .like('snapshot_type', `${period}%`)
+      .limit(1);
+      
+    if (data && data.length > 0) {
+      snapshotData[period] = data[0];
+    }
+  }
+  
+  return snapshotData;
+}
+
+// Helper function to calculate shift usage from snapshot data
+function calculateShiftUsageFromSnapshots(timePeriodsData, siteData) {
+  const shifts = {
+    night_shift: {
+      name: 'Night Shift',
+      start: '00:00:00',
+      end: '08:00:00', 
+      period: '00:00 - 08:00',
+      start_hour: 0,
+      end_hour: 8,
+      total_fuel_usage: 0,
+      total_cost: 0,
+      vehicles: {},
+      vehicle_count: 0,
+      readings_count: 0
+    },
+    day_shift: {
+      name: 'Day Shift',
+      start: '08:00:00',
+      end: '16:00:00',
+      period: '08:00 - 16:00', 
+      start_hour: 8,
+      end_hour: 16,
+      total_fuel_usage: 0,
+      total_cost: 0,
+      vehicles: {},
+      vehicle_count: 0,
+      readings_count: 0
+    },
+    evening_shift: {
+      name: 'Evening Shift',
+      start: '16:00:00',
+      end: '23:59:59',
+      period: '16:00 - 00:00',
+      start_hour: 16,
+      end_hour: 24,
+      total_fuel_usage: 0,
+      total_cost: 0,
+      vehicles: {},
+      vehicle_count: 0,
+      readings_count: 0
+    }
+  };
+  
+  // Calculate summary
+  const summary = {
+    total_daily_usage: 0,
+    total_daily_cost: 0,
+    most_active_shift: {
+      shift: 'night_shift',
+      name: 'Night Shift',
+      usage: 0
+    },
+    vehicle_count: 0,
+    total_readings: 0
+  };
+  
+  return {
+    summary,
+    shifts,
+    vehicle_details: {},
+    data_source: 'energy_rite_daily_snapshots (fallback)',
+    calculation_method: 'snapshot-based calculation when no fuel probe data available',
+    note: 'Using pre-captured snapshots as fallback since no real-time fuel probe data exists'
+  };
+}
+
 class EnergyRiteReportsController {
   
   // Get today's sessions
@@ -350,6 +655,54 @@ class EnergyRiteReportsController {
         site.expandable = site.has_multiple_sessions;
       });
       
+      // Get fuel fills for the day with cost code filtering
+      let fillsQuery = supabase
+        .from('energy_rite_fuel_fills')
+        .select('*')
+        .gte('fill_date', targetDate)
+        .lt('fill_date', new Date(Date.parse(targetDate) + 24 * 60 * 60 * 1000).toISOString());
+      
+      // Apply cost code filtering if provided
+      if (cost_code) {
+        try {
+          const costCenterAccess = require('../../helpers/cost-center-access');
+          const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+          fillsQuery = fillsQuery.in('cost_code', accessibleCostCodes);
+        } catch (costError) {
+          console.log('Cost center access error:', costError.message);
+        }
+      }
+      
+      // Apply site filtering if provided
+      if (site_id) {
+        fillsQuery = fillsQuery.eq('plate', site_id);
+      }
+      
+      const { data: fuelFills, error: fillsError } = await fillsQuery;
+        
+      if (fillsError) console.log('No fuel fills found for date:', fillsError.message);
+      
+      // Group fills by vehicle
+      const fillsByVehicle = {};
+      if (fuelFills) {
+        fuelFills.forEach(fill => {
+          if (!fillsByVehicle[fill.plate]) {
+            fillsByVehicle[fill.plate] = {
+              fill_count: 0,
+              total_filled: 0,
+              fills: []
+            };
+          }
+          fillsByVehicle[fill.plate].fill_count++;
+          fillsByVehicle[fill.plate].total_filled += parseFloat(fill.fill_amount || 0);
+          fillsByVehicle[fill.plate].fills.push({
+            time: fill.fill_date,
+            amount: fill.fill_amount,
+            method: fill.detection_method
+          });
+        });
+      }
+      
       // Add fuel level snapshots from fuel data
       const fuelSnapshots = {};
       fuelData.forEach(record => {
@@ -357,7 +710,8 @@ class EnergyRiteReportsController {
           fuelSnapshots[record.plate] = {
             morning_fuel: null,
             evening_fuel: null,
-            fuel_readings: []
+            fuel_readings: [],
+            fuel_fills: fillsByVehicle[record.plate] || { fill_count: 0, total_filled: 0, fills: [] }
           };
         }
         
@@ -609,12 +963,17 @@ class EnergyRiteReportsController {
         });
       }
       
-      // Merge fuel snapshots with activity summary
+      // Merge fuel snapshots and fills with activity summary
       Object.keys(fuelSnapshots).forEach(plate => {
         if (activitySummary[plate]) {
           activitySummary[plate].fuel_snapshots = fuelSnapshots[plate];
+          activitySummary[plate].fuel_fills = fuelSnapshots[plate].fuel_fills;
         }
       });
+      
+      // Add fuel fill summary to main summary (use session data to avoid double counting)
+      summary.total_fuel_fills = fuelFills ? fuelFills.length : 0;
+      summary.total_fuel_filled_amount = sessionsData.reduce((sum, s) => sum + parseFloat(s.total_fill || 0), 0);
       
       res.json({
         success: true,
@@ -630,6 +989,17 @@ class EnergyRiteReportsController {
             fuel_cost_per_liter: fuelCostPerLiter,
             peak_usage_period: peakPeriod,
             peak_usage_site: peakSite,
+            peak_usage_analysis: {
+              highest_usage_site: Object.values(activitySummary).sort((a, b) => b.total_fuel_usage - a.total_fuel_usage)[0] || null,
+              highest_fill_site: Object.values(activitySummary).sort((a, b) => b.total_fuel_filled - a.total_fuel_filled)[0] || null,
+              most_active_site: Object.values(activitySummary).sort((a, b) => b.total_operating_hours - a.total_operating_hours)[0] || null
+            },
+            fuel_fills: {
+              total_fill_events: summary.total_fuel_fills,
+              total_fuel_filled: summary.total_fuel_filled_amount.toFixed(2),
+              fills_by_vehicle: fillsByVehicle,
+              data_source: 'Sessions: total_fill, Events: energy_rite_fuel_fills'
+            },
             period_breakdown: {
               morning: {
                 fuel_usage: fuelConsumption.morning.usage.toFixed(2),
@@ -646,6 +1016,7 @@ class EnergyRiteReportsController {
             },
             financial_breakdown: financialAnalysis
           },
+          shift_fuel_tracking: await calculateShiftFuelUsage(targetDate, fuelData, cost_code, site_id),
           sites: Object.values(activitySummary)
         }
       });
@@ -1462,6 +1833,436 @@ class EnergyRiteReportsController {
         success: false,
         error: 'Failed to generate monthly report',
         message: error.message
+      });
+    }
+  }
+
+  // Download Daily Activity Report - Uses exact same logic as getDailyReport but for specific date
+  async downloadActivityReport(req, res) {
+    try {
+      const ExcelJS = require('exceljs');
+      const { date, cost_code, site_id, format = 'excel' } = req.query;
+      
+      // Validate required parameters
+      if (!date) {
+        return res.status(400).json({
+          success: false,
+          error: 'Date parameter is required',
+          message: 'Please provide a date in YYYY-MM-DD format'
+        });
+      }
+      
+      const targetDate = date;
+      
+      // Use EXACT same logic as getDailyReport but for single date instead of month
+      let dailyQuery = supabase
+        .from('energy_rite_operating_sessions')
+        .select(`
+          branch,
+          cost_code,
+          company,
+          operating_hours,
+          total_usage,
+          total_fill,
+          session_status,
+          liter_usage_per_hour,
+          cost_for_usage,
+          session_date,
+          session_start_time,
+          session_end_time
+        `)
+        .eq('session_date', targetDate)  // Only difference: single date instead of date range
+        .eq('session_status', 'COMPLETED');
+      
+      // Apply hierarchical cost code filtering if provided (EXACT same as getDailyReport)
+      if (cost_code) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        dailyQuery = dailyQuery.in('cost_code', accessibleCostCodes);
+      }
+      
+      const { data: dailyData, error: dailyError } = await dailyQuery;
+      if (dailyError) throw new Error(`Database error: ${dailyError.message}`);
+      
+      // Get current fuel levels from latest fuel data (EXACT same as getDailyReport)
+      const { data: currentFuelData, error: fuelError } = await supabase
+        .from('energy_rite_fuel_data')
+        .select('plate, fuel_probe_1_level, drivername, created_at')
+        .order('created_at', { ascending: false });
+        
+      if (fuelError) throw new Error(`Fuel data error: ${fuelError.message}`);
+      
+      // Get latest fuel level per site (EXACT same as getDailyReport)
+      const latestFuelBySite = {};
+      currentFuelData.forEach(record => {
+        if (!latestFuelBySite[record.plate]) {
+          latestFuelBySite[record.plate] = {
+            fuel_level: record.fuel_probe_1_level || 0,
+            engine_status: record.drivername || 'UNKNOWN',
+            last_update: record.created_at
+          };
+        }
+      });
+      
+      // Group daily data by branch (EXACT same logic as getDailyReport)
+      const dailyByBranch = {};
+      dailyData.forEach(session => {
+        if (!dailyByBranch[session.branch]) {
+          dailyByBranch[session.branch] = {
+            branch: session.branch,
+            cost_code: session.cost_code,
+            company: session.company || 'KFC',
+            total_running_hours: 0,
+            total_fuel_usage: 0,
+            total_fuel_filled: 0,
+            total_sessions: 0,
+            completed_sessions: 0,
+            avg_efficiency: 0,
+            total_cost: 0,
+            last_session: null
+          };
+        }
+        
+        const branch = dailyByBranch[session.branch];
+        branch.total_running_hours += parseFloat(session.operating_hours || 0);
+        branch.total_fuel_usage += parseFloat(session.total_usage || 0);
+        branch.total_fuel_filled += parseFloat(session.total_fill || 0);
+        branch.total_sessions += 1;
+        branch.completed_sessions += 1;
+        branch.total_cost += parseFloat(session.cost_for_usage || 0);
+        
+        // Track latest session
+        if (!branch.last_session || session.session_end_time > branch.last_session) {
+          branch.last_session = session.session_end_time;
+        }
+      });
+      
+      // Calculate averages (EXACT same as getDailyReport)
+      Object.values(dailyByBranch).forEach(branch => {
+        if (branch.total_running_hours > 0) {
+          branch.avg_efficiency = branch.total_fuel_usage / branch.total_running_hours;
+        }
+      });
+      
+      // Get vehicle lookup with hierarchical cost code filtering (EXACT same as getDailyReport)
+      let vehicleLookupQuery = supabase
+        .from('energyrite_vehicle_lookup')
+        .select('plate, cost_code');
+        
+      if (cost_code) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        vehicleLookupQuery = vehicleLookupQuery.in('cost_code', accessibleCostCodes);
+      }
+      
+      const { data: vehicleLookup, error: lookupError } = await vehicleLookupQuery;
+      if (lookupError) throw new Error(`Lookup error: ${lookupError.message}`);
+      
+      const allSites = new Set();
+      vehicleLookup.forEach(v => allSites.add(v.plate));
+      Object.keys(dailyByBranch).forEach(branch => allSites.add(branch));
+      
+      // Structure the response (EXACT same as getDailyReport but with date instead of month/year)
+      const report = {
+        report_date: new Date(),
+        date: targetDate,
+        period: targetDate,
+        sites: Array.from(allSites).map(site => {
+          const vehicleInfo = vehicleLookup.find(v => v.plate === site);
+          const dailyInfo = dailyByBranch[site];
+          const currentInfo = latestFuelBySite[site];
+          
+          return {
+            branch: site,
+            company: dailyInfo?.company || 'KFC',
+            cost_code: vehicleInfo?.cost_code || 'N/A',
+            current_fuel_level: currentInfo?.fuel_level || 0,
+            current_engine_status: currentInfo?.engine_status || 'UNKNOWN',
+            last_activity: currentInfo?.last_update || dailyInfo?.last_session,
+            daily_data: dailyInfo || {
+              total_running_hours: 0,
+              total_fuel_usage: 0,
+              total_fuel_filled: 0,
+              total_sessions: 0,
+              completed_sessions: 0,
+              avg_efficiency: 0,
+              total_cost: 0
+            }
+          };
+        })
+      };
+
+      if (format === 'json') {
+        // JSON download - EXACT same structure as getDailyReport
+        const filename = `daily-activity-report-${targetDate}${cost_code ? '-' + cost_code : '-all-centers'}${site_id ? '-' + site_id : ''}.json`;
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/json');
+        return res.json({
+          success: true,
+          data: report
+        });
+      }
+
+      // Excel download - keeping it simple and clean like getDailyReport would be
+      const workbook = new ExcelJS.Workbook();
+      
+      // Single sheet: Daily Activity Overview (matching getDailyReport style)
+      const overviewSheet = workbook.addWorksheet('Daily Overview');
+      
+      // Header
+      overviewSheet.mergeCells('A1:H1');
+      const titleCell = overviewSheet.getCell('A1');
+      titleCell.value = 'Daily Activity Report - ' + targetDate;
+      titleCell.font = { size: 16, bold: true };
+      titleCell.alignment = { horizontal: 'center' };
+      
+      overviewSheet.mergeCells('A2:H2');
+      const infoCell = overviewSheet.getCell('A2');
+      infoCell.value = `Date: ${targetDate} | Cost Center: ${cost_code || 'All Centers'}${site_id ? ' | Site: ' + site_id : ''}`;
+      infoCell.font = { size: 12, bold: true };
+      infoCell.alignment = { horizontal: 'center' };
+      
+      // Column headers (matching getDailyReport data structure)
+      const headers = ['Branch', 'Company', 'Cost Code', 'Current Fuel', 'Engine Status', 'Running Hours', 'Fuel Usage', 'Total Cost'];
+      overviewSheet.addRow([]); // Empty row
+      const headerRow = overviewSheet.addRow(headers);
+      headerRow.font = { bold: true };
+      
+      // Data rows
+      report.sites.forEach(site => {
+        overviewSheet.addRow([
+          site.branch,
+          site.company,
+          site.cost_code,
+          site.current_fuel_level,
+          site.current_engine_status,
+          site.daily_data.total_running_hours,
+          site.daily_data.total_fuel_usage,
+          site.daily_data.total_cost
+        ]);
+      });
+      
+      // Auto-fit columns
+      overviewSheet.columns.forEach(column => {
+        if (column.header) {
+          column.width = Math.max(column.header.length + 2, 15);
+        }
+      });
+
+      // Generate and send Excel file
+      const filename = `daily-activity-report-${targetDate}${cost_code ? '-' + cost_code : '-all-centers'}${site_id ? '-' + site_id : ''}.xlsx`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      
+      const buffer = await workbook.xlsx.writeBuffer();
+      res.send(buffer);
+
+    } catch (error) {
+      console.error('Error generating download report:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to generate download report',
+        message: error.message
+      });
+    }
+  }
+
+  // Get snapshot data with optional cost code filtering, hierarchy support, and period-based fuel consumption
+  async getSnapshotData(req, res) {
+    try {
+      const { 
+        cost_code, 
+        date, 
+        snapshot_type, 
+        limit = 50, 
+        offset = 0,
+        include_hierarchy = true, // New parameter for hierarchy support
+        calculate_fuel_usage = false // New parameter for fuel consumption calculations
+      } = req.query;
+
+      console.log(`📸 Fetching snapshot data - Cost Code: ${cost_code || 'All'}, Date: ${date || 'Today'}, Type: ${snapshot_type || 'All'}, Hierarchy: ${include_hierarchy}, Fuel Usage: ${calculate_fuel_usage}`);
+
+      // Handle cost center hierarchy if cost_code is provided
+      let accessibleCostCodes = [];
+      if (cost_code && include_hierarchy !== 'false') {
+        try {
+          const costCenterAccess = require('../../helpers/cost-center-access');
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+          console.log(`🔐 Hierarchical access: ${accessibleCostCodes.length} cost centers accessible`);
+        } catch (error) {
+          console.log('⚠️ Cost center hierarchy access error:', error.message);
+          // Fallback to exact match
+          accessibleCostCodes = [cost_code];
+        }
+      } else if (cost_code) {
+        // Exact match only
+        accessibleCostCodes = [cost_code];
+      }
+
+      // Get target date
+      const targetDate = date || new Date().toISOString().split('T')[0];
+
+      // Build query for snapshots
+      let query = supabase
+        .from('energy_rite_daily_snapshots')
+        .select('*');
+
+      // Apply cost code filters
+      if (accessibleCostCodes.length > 0) {
+        if (accessibleCostCodes.length === 1) {
+          // Single cost code
+          query = query.eq('snapshot_data->>cost_code', accessibleCostCodes[0]);
+        } else {
+          // Multiple cost codes (hierarchy)
+          query = query.in('snapshot_data->>cost_code', accessibleCostCodes);
+        }
+      }
+
+      // Apply date filter
+      query = query.eq('snapshot_date', targetDate);
+
+      // Apply snapshot type filter if specified
+      if (snapshot_type) {
+        query = query.eq('snapshot_type', snapshot_type);
+      }
+
+      // Apply pagination and ordering
+      query = query
+        .order('snapshot_time', { ascending: false })
+        .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+      const { data: snapshots, error } = await query;
+
+      if (error) {
+        throw new Error(`Database error: ${error.message}`);
+      }
+
+      // Calculate fuel usage if requested
+      let fuelUsageAnalysis = null;
+      if (calculate_fuel_usage === 'true') {
+        console.log('⛽ Calculating period fuel usage...');
+        fuelUsageAnalysis = await calculatePeriodFuelUsage(targetDate, accessibleCostCodes, snapshot_type);
+      }
+
+      // Process and enhance snapshot data
+      const processedSnapshots = snapshots.map(snapshot => {
+        const snapshotData = snapshot.snapshot_data || {};
+        return {
+          id: snapshot.id,
+          snapshot_date: snapshot.snapshot_date,
+          snapshot_time: snapshot.snapshot_time,
+          snapshot_type: snapshot.snapshot_type,
+          branch: snapshot.branch,
+          company: snapshot.company,
+          cost_code: snapshotData.cost_code || null,
+          fuel_level: snapshotData.fuel_level || 0,
+          fuel_volume: snapshotData.fuel_volume || 0,
+          engine_status: snapshotData.engine_status || 'UNKNOWN',
+          vehicle_plate: snapshotData.vehicle_plate || snapshot.branch,
+          site_id: snapshotData.site_id || null,
+          notes: snapshotData.notes || null,
+          captured_at: snapshotData.captured_at || snapshot.snapshot_time,
+          raw_data: snapshotData
+        };
+      });
+
+      // Calculate summary statistics
+      const totalSnapshots = processedSnapshots.length;
+      const withCostCodes = processedSnapshots.filter(s => s.cost_code).length;
+      const totalFuelVolume = processedSnapshots.reduce((sum, s) => sum + (s.fuel_volume || 0), 0);
+      const avgFuelLevel = totalSnapshots > 0 ? 
+        processedSnapshots.reduce((sum, s) => sum + (s.fuel_level || 0), 0) / totalSnapshots : 0;
+
+      // Group by cost code for breakdown with hierarchy info
+      const costCodeBreakdown = {};
+      processedSnapshots.forEach(snapshot => {
+        const code = snapshot.cost_code || 'NO_COST_CODE';
+        if (!costCodeBreakdown[code]) {
+          costCodeBreakdown[code] = {
+            cost_code: snapshot.cost_code,
+            count: 0,
+            total_fuel_volume: 0,
+            vehicles: [],
+            // Add hierarchy information
+            is_accessible_via_hierarchy: cost_code && snapshot.cost_code && 
+              snapshot.cost_code !== cost_code && 
+              snapshot.cost_code.startsWith(cost_code + '-'),
+            hierarchy_level: cost_code && snapshot.cost_code ? 
+              snapshot.cost_code.split('-').length - (cost_code.split('-').length) : 0
+          };
+        }
+        costCodeBreakdown[code].count++;
+        costCodeBreakdown[code].total_fuel_volume += snapshot.fuel_volume || 0;
+        if (!costCodeBreakdown[code].vehicles.includes(snapshot.vehicle_plate)) {
+          costCodeBreakdown[code].vehicles.push(snapshot.vehicle_plate);
+        }
+      });
+
+      // Group by snapshot type
+      const typeBreakdown = {};
+      processedSnapshots.forEach(snapshot => {
+        const type = snapshot.snapshot_type;
+        typeBreakdown[type] = (typeBreakdown[type] || 0) + 1;
+      });
+
+      // Create hierarchy summary
+      const hierarchySummary = cost_code && include_hierarchy !== 'false' ? {
+        requested_cost_code: cost_code,
+        accessible_cost_codes: accessibleCostCodes,
+        hierarchy_enabled: true,
+        total_accessible_codes: accessibleCostCodes.length,
+        direct_matches: processedSnapshots.filter(s => s.cost_code === cost_code).length,
+        hierarchy_matches: processedSnapshots.filter(s => 
+          s.cost_code && s.cost_code !== cost_code && 
+          accessibleCostCodes.includes(s.cost_code)
+        ).length
+      } : {
+        hierarchy_enabled: false
+      };
+
+      res.status(200).json({
+        success: true,
+        data: {
+          snapshots: processedSnapshots,
+          fuel_usage_analysis: fuelUsageAnalysis, // New fuel consumption data
+          pagination: {
+            total_count: totalSnapshots,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            has_more: totalSnapshots === parseInt(limit)
+          },
+          summary: {
+            total_snapshots: totalSnapshots,
+            snapshots_with_cost_codes: withCostCodes,
+            cost_code_coverage_percentage: totalSnapshots > 0 ? 
+              ((withCostCodes / totalSnapshots) * 100).toFixed(1) : 0,
+            total_fuel_volume: totalFuelVolume.toFixed(1),
+            average_fuel_level: avgFuelLevel.toFixed(1)
+          },
+          hierarchy: hierarchySummary,
+          breakdowns: {
+            by_cost_code: Object.values(costCodeBreakdown),
+            by_snapshot_type: typeBreakdown
+          },
+          filters_applied: {
+            cost_code: cost_code || null,
+            accessible_cost_codes: accessibleCostCodes.length > 0 ? accessibleCostCodes : null,
+            date: targetDate,
+            snapshot_type: snapshot_type || null,
+            include_hierarchy: include_hierarchy !== 'false',
+            calculate_fuel_usage: calculate_fuel_usage === 'true'
+          }
+        },
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error('❌ Error fetching snapshot data:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch snapshot data',
+        message: error.message,
+        timestamp: new Date().toISOString()
       });
     }
   }
