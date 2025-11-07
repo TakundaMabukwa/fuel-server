@@ -1,10 +1,17 @@
+require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
 // Initialize Supabase client
-const supabase = createClient(
-  'https://fmcfuxkngqyjyqezgzxy.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZtY2Z1eGtuZ3F5anlxZXpneno.v2J1ZaBRVvRQqRtTwZa1J8aXVd9KJmqyb5_dqI6chVc'
-);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('❌ Missing Supabase environment variables');
+  console.error('Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your .env file');
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 async function testCostCodeIntegration() {
   console.log('🔍 Testing Cost Code Integration Status...\n');
