@@ -4,22 +4,26 @@ const axios = require('axios');
 class EnhancedExecutiveDashboardController {
 
   /**
-   * Get executive dashboard focused on continuous operations and daily metrics
+   * Get executive dashboard focused on cumulative operations and fuel tracking
    * - Total sites operating
-   * - Litres used (non-cumulative)
+   * - Litres used (cumulative)
+   * - Litres filled (from fuel fill events)
    * - Total operational hours
    * - Sites running over 24 hours (continuous operations)
    */
   async getExecutiveDashboard(req, res) {
     try {
-      const { date, costCode, costCodes } = req.query;
+      const { date, costCode, costCodes, period = 30 } = req.query;
       
-      // Use provided date or today
+      // Use provided date or today for end date
       const targetDate = date || new Date().toISOString().split('T')[0];
-      const startOfDay = `${targetDate}T00:00:00.000Z`;
-      const endOfDay = `${targetDate}T23:59:59.999Z`;
       
-      console.log(`🎯 Executive Dashboard for ${targetDate}`);
+      // Calculate cumulative period start date
+      const endDate = new Date(targetDate);
+      const startDate = new Date(endDate.getTime() - parseInt(period) * 24 * 60 * 60 * 1000);
+      const startDateStr = startDate.toISOString().split('T')[0];
+      
+      console.log(`🎯 Executive Dashboard: ${startDateStr} to ${targetDate} (${period} days cumulative)`);
       
       // Get current fleet status
       const vehicleResponse = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles');
@@ -56,7 +60,7 @@ class EnhancedExecutiveDashboardController {
         });
       }
       
-      // Get operating sessions for the target date (non-cumulative)
+      // Get operating sessions for the cumulative period
       let sessionsQuery = supabase
         .from('energy_rite_operating_sessions')
         .select(`
@@ -70,7 +74,8 @@ class EnhancedExecutiveDashboardController {
           branch,
           cost_code
         `)
-        .eq('session_date', targetDate)
+        .gte('session_date', startDateStr)
+        .lte('session_date', targetDate)
         .eq('session_status', 'COMPLETED');
         
       // Apply cost code filtering to sessions
@@ -91,24 +96,66 @@ class EnhancedExecutiveDashboardController {
         sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
       }
       
-      const { data: todaySessions, error: sessionsError } = await sessionsQuery;
+      const { data: sessions, error: sessionsError } = await sessionsQuery;
       if (sessionsError) throw sessionsError;
       
-      // Calculate daily operational metrics (non-cumulative)
-      const totalLitresUsed = todaySessions.reduce((sum, s) => sum + (parseFloat(s.total_usage) || 0), 0);
-      const totalOperationalHours = todaySessions.reduce((sum, s) => sum + (parseFloat(s.operating_hours) || 0), 0);
-      const totalOperationalCost = todaySessions.reduce((sum, s) => sum + (parseFloat(s.cost_for_usage) || 0), 0);
+      // Get fuel fills for the cumulative period
+      let fuelFillsQuery = supabase
+        .from('energy_rite_fuel_fills')
+        .select(`
+          *,
+          fill_date,
+          plate,
+          cost_code,
+          fill_amount,
+          fuel_before,
+          fuel_after,
+          detection_method
+        `)
+        .gte('fill_date', `${startDateStr}T00:00:00.000Z`)
+        .lte('fill_date', `${targetDate}T23:59:59.999Z`)
+        .eq('status', 'detected');
+        
+      // Apply cost code filtering to fuel fills
+      if (costCode || costCodes) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        let accessibleCostCodes = [];
+        
+        if (costCodes) {
+          const codeArray = costCodes.split(',').map(c => c.trim());
+          for (const code of codeArray) {
+            const accessible = await costCenterAccess.getAccessibleCostCenters(code);
+            accessibleCostCodes.push(...accessible);
+          }
+        } else if (costCode) {
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(costCode);
+        }
+        
+        fuelFillsQuery = fuelFillsQuery.in('cost_code', accessibleCostCodes);
+      }
       
-      // Get unique sites that operated today
-      const sitesOperatedToday = [...new Set(todaySessions.map(s => s.branch))];
-      const totalSites = sitesOperatedToday.length;
+      const { data: fuelFills, error: fillsError } = await fuelFillsQuery;
+      if (fillsError) throw fillsError;
+      
+      // Calculate cumulative operational metrics
+      const totalLitresUsed = sessions.reduce((sum, s) => sum + (parseFloat(s.total_usage) || 0), 0);
+      const totalLitresFilled = fuelFills.reduce((sum, f) => sum + (parseFloat(f.fill_amount) || 0), 0);
+      const totalOperationalHours = sessions.reduce((sum, s) => sum + (parseFloat(s.operating_hours) || 0), 0);
+      const totalOperationalCost = sessions.reduce((sum, s) => sum + (parseFloat(s.cost_for_usage) || 0), 0);
+      
+      // Get unique sites that operated during the period
+      const sitesOperatedTotal = [...new Set(sessions.map(s => s.branch))];
+      const totalSites = sitesOperatedTotal.length;
+      
+      // Get sites with fuel fills
+      const sitesWithFills = [...new Set(fuelFills.map(f => f.plate))];
       
       // Detect continuous operations (sites running over 24 hours)
       const continuousOperationsSites = await detectContinuousOperations(targetDate, costCode, costCodes);
       
-      // Site breakdown with daily metrics
+      // Site breakdown with cumulative metrics and fuel fills
       const siteMetrics = {};
-      todaySessions.forEach(session => {
+      sessions.forEach(session => {
         const site = session.branch;
         if (!siteMetrics[site]) {
           siteMetrics[site] = {
@@ -118,6 +165,8 @@ class EnhancedExecutiveDashboardController {
             operating_hours: 0,
             fuel_usage_liters: 0,
             operational_cost: 0,
+            fuel_fills_count: 0,
+            fuel_filled_liters: 0,
             is_continuous: continuousOperationsSites.some(cs => cs.site === site)
           };
         }
@@ -128,6 +177,28 @@ class EnhancedExecutiveDashboardController {
         siteMetrics[site].operational_cost += parseFloat(session.cost_for_usage || 0);
       });
       
+      // Add fuel fills data to site metrics
+      fuelFills.forEach(fill => {
+        const site = fill.plate;
+        if (siteMetrics[site]) {
+          siteMetrics[site].fuel_fills_count++;
+          siteMetrics[site].fuel_filled_liters += parseFloat(fill.fill_amount || 0);
+        } else {
+          // Site had fuel fills but no operational sessions in this period
+          siteMetrics[site] = {
+            site_name: site,
+            cost_code: fill.cost_code,
+            total_sessions: 0,
+            operating_hours: 0,
+            fuel_usage_liters: 0,
+            operational_cost: 0,
+            fuel_fills_count: 1,
+            fuel_filled_liters: parseFloat(fill.fill_amount || 0),
+            is_continuous: false
+          };
+        }
+      });
+      
       // Convert to array and sort by operating hours
       const siteBreakdown = Object.values(siteMetrics)
         .map(site => ({
@@ -135,13 +206,16 @@ class EnhancedExecutiveDashboardController {
           efficiency_liters_per_hour: site.operating_hours > 0 ? 
             Math.round((site.fuel_usage_liters / site.operating_hours) * 100) / 100 : 0,
           cost_per_hour: site.operating_hours > 0 ? 
-            Math.round((site.operational_cost / site.operating_hours) * 100) / 100 : 0
+            Math.round((site.operational_cost / site.operating_hours) * 100) / 100 : 0,
+          fuel_net_usage: site.fuel_usage_liters - site.fuel_filled_liters, // Net fuel consumption
+          fuel_efficiency_with_fills: site.fuel_filled_liters > 0 ? 
+            ((site.fuel_usage_liters / site.fuel_filled_liters) * 100).toFixed(2) + '%' : 'N/A'
         }))
         .sort((a, b) => b.operating_hours - a.operating_hours);
       
-      // Cost center summary
+      // Cost center summary with fuel fills
       const costCenterMetrics = {};
-      todaySessions.forEach(session => {
+      sessions.forEach(session => {
         const costCode = session.cost_code || 'UNKNOWN';
         if (!costCenterMetrics[costCode]) {
           costCenterMetrics[costCode] = {
@@ -150,7 +224,9 @@ class EnhancedExecutiveDashboardController {
             operating_hours: 0,
             fuel_usage_liters: 0,
             operational_cost: 0,
-            sessions: 0
+            sessions: 0,
+            fuel_fills_count: 0,
+            fuel_filled_liters: 0
           };
         }
         
@@ -161,6 +237,27 @@ class EnhancedExecutiveDashboardController {
         costCenterMetrics[costCode].sessions++;
       });
       
+      // Add fuel fills data to cost center metrics
+      fuelFills.forEach(fill => {
+        const costCode = fill.cost_code || 'UNKNOWN';
+        if (!costCenterMetrics[costCode]) {
+          costCenterMetrics[costCode] = {
+            cost_code: costCode,
+            sites: new Set(),
+            operating_hours: 0,
+            fuel_usage_liters: 0,
+            operational_cost: 0,
+            sessions: 0,
+            fuel_fills_count: 0,
+            fuel_filled_liters: 0
+          };
+        }
+        
+        costCenterMetrics[costCode].sites.add(fill.plate);
+        costCenterMetrics[costCode].fuel_fills_count++;
+        costCenterMetrics[costCode].fuel_filled_liters += parseFloat(fill.fill_amount || 0);
+      });
+      
       const costCenterSummary = Object.values(costCenterMetrics)
         .map(cc => ({
           cost_code: cc.cost_code,
@@ -168,10 +265,13 @@ class EnhancedExecutiveDashboardController {
           sites: Array.from(cc.sites),
           operating_hours: Math.round(cc.operating_hours * 100) / 100,
           fuel_usage_liters: Math.round(cc.fuel_usage_liters * 100) / 100,
+          fuel_filled_liters: Math.round(cc.fuel_filled_liters * 100) / 100,
           operational_cost: Math.round(cc.operational_cost * 100) / 100,
           sessions: cc.sessions,
+          fuel_fills_count: cc.fuel_fills_count,
           avg_fuel_per_hour: cc.operating_hours > 0 ? 
-            Math.round((cc.fuel_usage_liters / cc.operating_hours) * 100) / 100 : 0
+            Math.round((cc.fuel_usage_liters / cc.operating_hours) * 100) / 100 : 0,
+          fuel_net_usage: Math.round((cc.fuel_usage_liters - cc.fuel_filled_liters) * 100) / 100
         }))
         .sort((a, b) => b.operating_hours - a.operating_hours);
       
@@ -182,19 +282,28 @@ class EnhancedExecutiveDashboardController {
       
       // Build response
       const dashboard = {
-        date: targetDate,
+        period: {
+          start_date: startDateStr,
+          end_date: targetDate, 
+          days: parseInt(period),
+          is_cumulative: true
+        },
         filters: {
           cost_code: costCode || null,
           cost_codes: costCodes || null
         },
         
-        // Key metrics you requested
+        // Key metrics you requested (now cumulative)
         key_metrics: {
           total_sites_operated: totalSites,
           total_litres_used: Math.round(totalLitresUsed * 100) / 100,
+          total_litres_filled: Math.round(totalLitresFilled * 100) / 100,
+          net_fuel_consumption: Math.round((totalLitresUsed - totalLitresFilled) * 100) / 100,
           total_operational_hours: Math.round(totalOperationalHours * 100) / 100,
           continuous_operations_count: continuousOperationsSites.length,
-          total_operational_cost: Math.round(totalOperationalCost * 100) / 100
+          total_operational_cost: Math.round(totalOperationalCost * 100) / 100,
+          sites_with_fuel_fills: sitesWithFills.length,
+          total_fuel_fill_events: fuelFills.length
         },
         
         // Current fleet status
@@ -213,8 +322,46 @@ class EnhancedExecutiveDashboardController {
           total_fuel: continuousOperationsSites.reduce((sum, co) => sum + co.fuel_usage, 0)
         },
         
+        // Fuel tracking analysis
+        fuel_tracking: {
+          fuel_fills_summary: {
+            total_fill_events: fuelFills.length,
+            total_litres_filled: Math.round(totalLitresFilled * 100) / 100,
+            sites_with_fills: sitesWithFills.length,
+            average_fill_amount: fuelFills.length > 0 ? 
+              Math.round((totalLitresFilled / fuelFills.length) * 100) / 100 : 0
+          },
+          fuel_efficiency: {
+            total_used: Math.round(totalLitresUsed * 100) / 100,
+            total_filled: Math.round(totalLitresFilled * 100) / 100,
+            net_consumption: Math.round((totalLitresUsed - totalLitresFilled) * 100) / 100,
+            usage_to_fill_ratio: totalLitresFilled > 0 ? 
+              Math.round((totalLitresUsed / totalLitresFilled) * 100) / 100 : 0,
+            fill_frequency: totalSites > 0 ? 
+              Math.round((fuelFills.length / totalSites) * 100) / 100 : 0
+          }
+        },
+        
         // Site performance breakdown
         site_performance: siteBreakdown,
+        
+        // Top 10 sites by fuel usage
+        top_performing_sites: siteBreakdown
+          .filter(site => site.fuel_usage_liters > 0)
+          .sort((a, b) => b.fuel_usage_liters - a.fuel_usage_liters)
+          .slice(0, 10)
+          .map(site => ({
+            site: site.site_name,
+            cost_code: site.cost_code,
+            sessions: site.total_sessions,
+            operating_hours: site.operating_hours,
+            fuel_usage: site.fuel_usage_liters,
+            fuel_filled: site.fuel_filled_liters,
+            net_fuel_usage: site.fuel_net_usage,
+            total_cost: site.operational_cost,
+            efficiency: site.efficiency_liters_per_hour,
+            cost_per_hour: site.cost_per_hour
+          })),
         
         // Cost center analysis
         cost_center_analysis: costCenterSummary,
@@ -233,8 +380,10 @@ class EnhancedExecutiveDashboardController {
         
         // Insights for executives
         executive_insights: [
-          `${totalSites} sites operated today with ${Math.round(totalOperationalHours)} total hours`,
-          `${Math.round(totalLitresUsed)}L fuel consumed (non-cumulative daily usage)`,
+          `${totalSites} sites operated over ${period} days with ${Math.round(totalOperationalHours)} total hours`,
+          `${Math.round(totalLitresUsed)}L fuel consumed (cumulative over ${period} days)`,
+          `${Math.round(totalLitresFilled)}L fuel filled across ${fuelFills.length} fill events`,
+          `Net consumption: ${Math.round(totalLitresUsed - totalLitresFilled)}L (used minus filled)`,
           `${continuousOperationsSites.length} sites running continuous operations (24+ hours)`,
           `Fleet utilization: ${Math.round(fleetUtilization)}% (${currentlyActive}/${totalFleetSize} active)`,
           `Average efficiency: ${totalOperationalHours > 0 ? Math.round((totalLitresUsed / totalOperationalHours) * 10) / 10 : 0}L per hour`
@@ -245,7 +394,7 @@ class EnhancedExecutiveDashboardController {
         success: true,
         data: dashboard,
         timestamp: new Date().toISOString(),
-        note: "Metrics are non-cumulative and reset daily. Continuous operations detected based on 24+ hour patterns."
+        note: `Metrics are cumulative over ${period} days (${startDateStr} to ${targetDate}). Includes fuel usage and fuel fill tracking.`
       });
       
     } catch (error) {
