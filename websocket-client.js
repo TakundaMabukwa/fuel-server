@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const { supabase } = require('./supabase-client');
 const { detectFuelTheft } = require('./helpers/fuel-theft-detector');
 const { detectFuelFill } = require('./helpers/fuel-fill-detector');
+const ImprovedOnOffDetection = require('./fix-onoff-detection');
 const axios = require('axios');
 
 class EnergyRiteWebSocketClient {
@@ -10,6 +11,7 @@ class EnergyRiteWebSocketClient {
     this.ws = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
+    this.onOffDetector = new ImprovedOnOffDetection();
   }
 
   connect() {
@@ -106,12 +108,6 @@ class EnergyRiteWebSocketClient {
     // Log all driver names for debugging
     if (Math.random() < 0.1) { // Log 10% of messages
       console.log('🔍 DriverName received:', driverName, '-> normalized:', normalized);
-    }
-    
-    // Check for fuel fill status first
-    if (normalized.includes('POSSIBLE FUEL FILL') || 
-        normalized.includes('FUEL FILL')) {
-      return 'FUEL_FILL';
     }
     
     // Check for ON patterns (more comprehensive)
@@ -213,8 +209,6 @@ class EnergyRiteWebSocketClient {
           });
           
           console.log(`🟢 Engine ON: ${plate} - Opening: ${openingFuel}L (${openingPercentage}%)`);
-          
-          console.log(`🟢 Engine ON: ${plate} session started`);
         }
       } else if (engineStatus === 'OFF') {
         // Complete existing session
@@ -256,27 +250,15 @@ class EnergyRiteWebSocketClient {
             .eq('id', session.id);
             
           console.log(`🔴 Engine OFF: ${plate} - Duration: ${operatingHours.toFixed(2)}h, Opening: ${startingFuel}L, Closing: ${currentFuel}L, Used: ${fuelConsumed.toFixed(1)}L`);
-            
-
         }
       }
       
-      // Handle fuel fill status
-      if (engineStatus === 'FUEL_FILL') {
-        console.log(`⛽ Fuel fill status detected for ${plate}`);
-        // The fuel fill detection is already handled in processVehicleUpdate
-        return;
-      }
-      
-      // Log activity
+      // Log activity - THIS WAS MISSING!
       await supabase.from('energy_rite_activity_log').insert({
-        activity_type: engineStatus === 'ON' ? 'ENGINE_ON' : 'ENGINE_OFF',
-        description: `Engine ${engineStatus} detected for ${plate}`,
         branch: plate,
-        activity_data: { 
-          engine_status: engineStatus,
-          timestamp: currentTime.toISOString()
-        }
+        activity_type: engineStatus === 'ON' ? 'ENGINE_ON' : 'ENGINE_OFF',
+        activity_time: currentTime.toISOString(),
+        notes: `Engine ${engineStatus} detected`
       });
       
     } catch (error) {

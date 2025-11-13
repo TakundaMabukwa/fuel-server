@@ -1,115 +1,48 @@
-#!/usr/bin/env node
 require('dotenv').config();
 const XLSX = require('xlsx');
 const { supabase } = require('./supabase-client');
-const fs = require('fs');
-const path = require('path');
 
-// Cost code mapping for your files
-const COST_CODE_MAPPING = {
-  'YUM Equity_Fuel Report': 'YUM-EQUITY-001',
-  'Alchemy_Fuel Report': 'ALCHEMY-001', 
-  'Gunret_Fuel-Report': 'GUNRET-001',
-  'Spur_Fuel Report': 'SPUR-001',
-  'Weekly (4)': 'WEEKLY-001'
-};
-
-async function importHistoricalData() {
-  console.log('📊 Starting Historical Data Import...\n');
+async function importWeeklyOnly() {
+  console.log('📊 IMPORTING Weekly (4).xlsx ONLY\n');
   
   try {
-    const importFolder = './historical-imports';
-    if (!fs.existsSync(importFolder)) {
-      console.log('❌ Please create "historical-imports" folder and place your Excel files there');
-      return;
+    const workbook = XLSX.readFile('./historical-imports/Weekly (4).xlsx');
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+    
+    console.log(`📄 Found ${data.length} rows`);
+    
+    let imported = 0;
+    
+    for (const row of data) {
+      const session = parseWeeklyRow(row);
+      if (session) {
+        await insertSession(session);
+        imported++;
+      }
     }
     
-    const files = fs.readdirSync(importFolder).filter(file => file.endsWith('.xlsx') || file.endsWith('.xls'));
-    
-    if (files.length === 0) {
-      console.log('❌ No Excel files found in historical-imports folder');
-      return;
-    }
-    
-    console.log(`📁 Found ${files.length} Excel files to import\n`);
-    
-    for (const file of files) {
-      await processExcelFile(path.join(importFolder, file), file);
-    }
-    
-    console.log('\n🎉 Historical data import completed!');
+    console.log(`✅ Imported ${imported} sessions from Weekly (4).xlsx`);
     
   } catch (error) {
     console.error('❌ Import failed:', error.message);
   }
 }
 
-async function processExcelFile(filePath, fileName) {
-  console.log(`📄 Processing: ${fileName}`);
+function parseWeeklyRow(row) {
+  const site = row.Site;
+  if (!site || site.includes('Total') || site.includes('Site')) return null;
   
-  // Only process Daily .xlsx
-  if (!fileName.includes('Daily ')) {
-    console.log(`⚠️ Skipping ${fileName} - only processing Daily .xlsx`);
-    return;
-  }
-  
-  try {
-    const workbook = XLSX.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet);
-    
-    console.log(`📊 Found ${data.length} rows of data`);
-    
-    let importedCount = 0;
-    
-    for (const row of data) {
-      const sessionData = parseRowData(row, 'WEEKLY-001');
-      if (sessionData) {
-        await insertHistoricalSession(sessionData);
-        importedCount++;
-      }
-    }
-    
-    console.log(`✅ Imported ${importedCount} sessions from ${fileName}\n`);
-    
-  } catch (error) {
-    console.error(`❌ Error processing ${fileName}:`, error.message);
-  }
-}
-
-function getCostCodeFromFilename(fileName) {
-  for (const [key, value] of Object.entries(COST_CODE_MAPPING)) {
-    if (fileName.includes(key.replace('_', ' ')) || fileName.includes(key)) {
-      return value;
-    }
-  }
-  return null;
-}
-
-function parseRowData(row, costCode) {
-  const site = row['FUEL REPORT SUMMARY'];
-  const date = row['__EMPTY'];
-  const operatingHours = row['__EMPTY_1'];
-  
-  // Skip header rows and summary rows
-  if (!site || !date || !operatingHours || 
-      site.includes('FUEL REPORT SUMMARY') || 
-      site.includes('Site') || 
-      date.includes('Date') || 
-      date.includes('Total Running Hours')) {
-    return null;
-  }
-  
-  const duration = parseOperatingHours(operatingHours);
-  if (!duration || duration <= 0) return null;
-  
-  const sessionDate = parseExcelDate(date);
+  const sessionDate = parseExcelDate(row.Date);
   if (!sessionDate) return null;
+  
+  const hours = parseFloat(row['Operating Hours']) || 0;
+  if (hours <= 0) return null;
   
   const startTime = new Date(sessionDate);
   startTime.setHours(6, 0, 0, 0);
-  const endTime = new Date(startTime.getTime() + (duration * 60 * 60 * 1000));
+  const endTime = new Date(startTime.getTime() + (hours * 60 * 60 * 1000));
   
   return {
     branch: site.trim(),
@@ -118,38 +51,18 @@ function parseRowData(row, costCode) {
     session_date: sessionDate.toISOString().split('T')[0],
     session_start_time: startTime.toISOString(),
     session_end_time: endTime.toISOString(),
-    operating_hours: duration,
-    opening_percentage: parseFloat(row['__EMPTY_2']?.replace('%', '').replace(',', '.')) || 0,
-    opening_fuel: parseFloat(row['__EMPTY_3']?.replace(',', '.')) || 0,
-    closing_percentage: parseFloat(row['__EMPTY_4']?.replace('%', '').replace(',', '.')) || 0,
-    closing_fuel: parseFloat(row['__EMPTY_5']?.replace(',', '.')) || 0,
-    total_usage: parseFloat(row['__EMPTY_6']?.replace(',', '.')) || 0,
-    total_fill: parseFloat(row['__EMPTY_7']?.replace(',', '.')) || 0,
-    liter_usage_per_hour: parseFloat(row['__EMPTY_8']?.replace(',', '.')) || 0,
-    cost_for_usage: parseFloat(row['__EMPTY_9']?.split('=')[1]?.replace(',', '.')) || 0,
+    operating_hours: hours,
+    opening_percentage: parseFloat(row['Opening Percentage']) || 0,
+    opening_fuel: parseFloat(row['Opening Fuel']) || 0,
+    closing_percentage: parseFloat(row['Closing Percentage']) || 0,
+    closing_fuel: parseFloat(row['Closing Fuel']) || 0,
+    total_usage: parseFloat(row['Total Usage']) || 0,
+    total_fill: parseFloat(row['Total Fill']) || 0,
+    liter_usage_per_hour: parseFloat(row['Liter Usage Per Hour']) || 0,
+    cost_for_usage: parseFloat(row['Cost For Usage']) || 0,
     session_status: 'COMPLETED',
     notes: 'Imported from Weekly (4).xlsx'
   };
-}
-
-function parseOperatingHours(hoursText) {
-  if (!hoursText) return null;
-  
-  // Handle numeric values directly
-  const numeric = parseFloat(hoursText);
-  if (!isNaN(numeric) && numeric > 0) return numeric;
-  
-  // Handle text formats
-  if (typeof hoursText !== 'string') return null;
-  
-  const hourMatch = hoursText.match(/(\d+)\s*hours?/i);
-  const minuteMatch = hoursText.match(/(\d+)\s*minutes?/i);
-  
-  let totalHours = 0;
-  if (hourMatch) totalHours += parseInt(hourMatch[1]);
-  if (minuteMatch) totalHours += parseInt(minuteMatch[1]) / 60;
-  
-  return totalHours > 0 ? totalHours : null;
 }
 
 function parseExcelDate(dateValue) {
@@ -255,18 +168,17 @@ function getActualCostCode(site) {
   return SITE_COST_CODES[site.toUpperCase()] || 'KFC-0001-0001-0003';
 }
 
-async function insertHistoricalSession(sessionData) {
+async function insertSession(session) {
   try {
     const { error } = await supabase
       .from('energy_rite_operating_sessions')
-      .insert([sessionData]);
+      .insert(session);
     
     if (error) throw error;
     
   } catch (error) {
-    console.error('❌ Error inserting session:', error.message);
+    console.error(`❌ Error inserting ${session.branch}:`, error.message);
   }
 }
 
-// Run the import
-importHistoricalData();
+importWeeklyOnly();
