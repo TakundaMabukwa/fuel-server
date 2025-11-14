@@ -23,6 +23,8 @@ router.get('/activity/download', energyRiteReportsController.downloadActivityRep
 // Snapshot Data with Cost Code Filtering
 router.get('/snapshots', energyRiteReportsController.getSnapshotData);
 
+
+
 // Generate daily report data
 router.post('/daily/generate', energyRiteReportsController.generateDailyReportData);
 

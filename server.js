@@ -24,6 +24,7 @@ app.use('/api/energy-rite/executive-dashboard', require('./routes/energy-rite-ex
 app.use('/api/energy-rite/enhanced-executive-dashboard', require('./routes/enhanced-executive-dashboard'));
 app.use('/api/energy-rite/report-distribution', require('./routes/energy-rite-report-distribution'));
 app.use('/api/energy-rite/fuel-fills', require('./routes/energy-rite-fuel-fills'));
+app.use('/api/energy-rite/cumulative-snapshots', require('./routes/energy-rite-cumulative-snapshots'));
 app.use('/api/cost-center-access', require('./routes/cost-center-access'));
 
 // Health check

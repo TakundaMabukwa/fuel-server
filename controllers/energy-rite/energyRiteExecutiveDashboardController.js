@@ -76,7 +76,7 @@ class EnergyRiteExecutiveDashboardController {
         .select('*')
         .gte('session_date', start)
         .lte('session_date', end)
-        .eq('session_status', 'COMPLETED');
+        .in('session_status', ['COMPLETED', 'FUEL_FILL']);
         
       // Apply filtering by site_id or hierarchical cost code filtering if provided
       if (site_id) {
@@ -113,10 +113,18 @@ class EnergyRiteExecutiveDashboardController {
         ? vehicles.reduce((sum, v) => sum + (parseFloat(v.fuel_probe_1_level_percentage) || 0), 0) / vehicles.length 
         : 0;
       
-      // Calculate operational metrics from sessions
-      const totalOperatingHours = sessions.reduce((sum, s) => sum + (parseFloat(s.operating_hours) || 0), 0);
-      const totalFuelUsage = sessions.reduce((sum, s) => sum + (parseFloat(s.total_usage) || 0), 0);
-      const totalOperatingCost = sessions.reduce((sum, s) => sum + (parseFloat(s.cost_for_usage) || 0), 0);
+      // Separate engine sessions and fuel fills
+      const engineSessions = sessions.filter(s => s.session_status === 'COMPLETED');
+      const fuelFillSessions = sessions.filter(s => s.session_status === 'FUEL_FILL');
+      
+      // Calculate operational metrics from engine sessions
+      const totalOperatingHours = engineSessions.reduce((sum, s) => sum + (parseFloat(s.operating_hours) || 0), 0);
+      const totalFuelUsage = engineSessions.reduce((sum, s) => sum + (parseFloat(s.total_usage) || 0), 0);
+      const totalOperatingCost = engineSessions.reduce((sum, s) => sum + (parseFloat(s.cost_for_usage) || 0), 0);
+      
+      // Calculate fuel fill metrics
+      const totalFuelFills = fuelFillSessions.length;
+      const totalFuelFilled = fuelFillSessions.reduce((sum, s) => sum + (parseFloat(s.total_fill) || 0), 0);
       
       // Cost center breakdown
       const costCenterMetrics = {};
@@ -213,10 +221,14 @@ class EnergyRiteExecutiveDashboardController {
         operational_metrics: {
           total_operating_hours: Math.round(totalOperatingHours * 100) / 100,
           total_fuel_usage_liters: Math.round(totalFuelUsage * 100) / 100,
+          total_fuel_filled_liters: Math.round(totalFuelFilled * 100) / 100,
+          net_fuel_consumption: Math.round((totalFuelUsage - totalFuelFilled) * 100) / 100,
           total_operating_cost: Math.round(totalOperatingCost * 100) / 100,
           average_cost_per_hour: totalOperatingHours > 0 ? Math.round((totalOperatingCost / totalOperatingHours) * 100) / 100 : 0,
           average_fuel_per_hour: totalOperatingHours > 0 ? Math.round((totalFuelUsage / totalOperatingHours) * 100) / 100 : 0,
-          total_sessions: sessions.length
+          total_engine_sessions: engineSessions.length,
+          total_fuel_fill_events: totalFuelFills,
+          fuel_fill_frequency: totalFuelFills > 0 && totalOperatingHours > 0 ? Math.round((totalFuelFills / totalOperatingHours) * 100) / 100 : 0
         },
         cost_center_performance: costCenterSummary,
         activity_trends: activityTrend,
@@ -224,6 +236,9 @@ class EnergyRiteExecutiveDashboardController {
         key_insights: [
           `Fleet utilization: ${fleetUtilization.toFixed(1)}%`,
           `Total operational cost: R${totalOperatingCost.toFixed(2)}`,
+          `Fuel used: ${totalFuelUsage.toFixed(1)}L, Filled: ${totalFuelFilled.toFixed(1)}L`,
+          `Net consumption: ${(totalFuelUsage - totalFuelFilled).toFixed(1)}L`,
+          `${totalFuelFills} fuel fill events recorded`,
           `Average fuel consumption: ${totalOperatingHours > 0 ? (totalFuelUsage / totalOperatingHours).toFixed(1) : 0}L/hour`,
           `Most active cost center: ${costCenterSummary[0]?.cost_code || 'N/A'}`,
           `Top performing site: ${topSites[0]?.site || 'N/A'}`
