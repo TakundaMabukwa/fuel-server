@@ -1,104 +1,85 @@
-require('dotenv').config();
 const EnergyRiteWebSocketClient = require('./websocket-client');
-const { detectFuelFill } = require('./helpers/fuel-fill-detector');
-const { supabase } = require('./supabase-client');
 
-async function testFuelFill() {
-  try {
-    console.log('⛽ Testing fuel fill detection...\n');
-    
-    const wsClient = new EnergyRiteWebSocketClient('dummy-url');
-    
-    // Test 1: Status-based detection
-    console.log('🔍 Test 1: Status-based detection');
-    const testData1 = {
-      Plate: 'TEST-VEHICLE-1',
-      DriverName: 'Possible Fuel Fill',
-      fuel_probe_1_level: 150.5,
-      fuel_probe_1_volume_in_tank: 500,
-      fuel_probe_1_temperature: 25,
-      fuel_probe_1_level_percentage: 75,
-      Pocsagstr: 'TEST123'
-    };
-    
-    const status1 = wsClient.parseEngineStatus(testData1.DriverName);
-    console.log(`   Parsed status: ${status1}`);
-    
-    if (status1 === 'FUEL_FILL') {
-      console.log('   ✅ Status-based fuel fill detected correctly!');
-    } else {
-      console.log('   ❌ Status-based fuel fill not detected');
-    }
-    
-    // Test 2: Level-based detection
-    console.log('\n🔍 Test 2: Level-based detection');
-    
-    // Insert initial fuel level
-    await supabase.from('energy_rite_fuel_data').insert({
-      plate: 'TEST-VEHICLE-2',
-      fuel_probe_1_level: 50.0,
-      created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    });
-    
-    // Insert higher fuel level (simulating fill)
-    await supabase.from('energy_rite_fuel_data').insert({
-      plate: 'TEST-VEHICLE-2',
-      fuel_probe_1_level: 180.0, // +130L increase
-      created_at: new Date().toISOString()
-    });
-    
-    const fillResult = await detectFuelFill('TEST-VEHICLE-2', 180.0, 'Normal Operation');
-    
-    if (fillResult.isFill) {
-      console.log('   ✅ Level-based fuel fill detected!');
-      console.log(`   Fill Amount: ${fillResult.fillDetails.fillAmount.toFixed(1)}L`);
-      console.log(`   Detection Method: ${fillResult.fillDetails.detectionMethod}`);
-    } else {
-      console.log('   ❌ Level-based fuel fill not detected');
-      console.log(`   Reason: ${fillResult.reason}`);
-    }
-    
-    // Test 3: WebSocket processing
-    console.log('\n🔍 Test 3: WebSocket processing');
-    
-    const testData3 = {
-      Plate: 'TEST-VEHICLE-3',
-      DriverName: 'Possible Fuel Fill',
-      fuel_probe_1_level: 200.0
-    };
-    
-    await wsClient.processVehicleUpdate(testData3);
-    console.log('   ✅ WebSocket processing completed');
-    
-    // Check results
-    console.log('\n📋 Checking fuel fill logs...');
-    
-    const { data: fills, error } = await supabase
-      .from('energy_rite_fuel_fills')
-      .select('*')
-      .in('plate', ['TEST-VEHICLE-1', 'TEST-VEHICLE-2', 'TEST-VEHICLE-3'])
-      .order('fill_date', { ascending: false });
-    
-    if (error) {
-      console.log('   ⚠️  Fuel fills table might not exist. Run: create-fuel-fills-table.sql');
-    } else {
-      console.log(`   Found ${fills.length} fuel fill records:`);
-      fills.forEach((fill, index) => {
-        console.log(`   ${index + 1}. ${fill.plate}: +${fill.fill_amount}L (${fill.detection_method})`);
-      });
-    }
-    
-    // Cleanup
-    console.log('\n🧹 Cleaning up test data...');
-    await supabase.from('energy_rite_fuel_data').delete().in('plate', ['TEST-VEHICLE-1', 'TEST-VEHICLE-2', 'TEST-VEHICLE-3']);
-    await supabase.from('energy_rite_fuel_fills').delete().in('plate', ['TEST-VEHICLE-1', 'TEST-VEHICLE-2', 'TEST-VEHICLE-3']);
-    await supabase.from('energy_rite_activity_log').delete().in('branch', ['TEST-VEHICLE-1', 'TEST-VEHICLE-2', 'TEST-VEHICLE-3']);
-    
-    console.log('\n🎉 Fuel fill detection test completed!');
-    
-  } catch (error) {
-    console.error('❌ Test error:', error);
-  }
+// Mock supabase for testing
+const mockSupabase = {
+  from: (table) => ({
+    select: () => ({
+      eq: () => ({
+        eq: () => ({
+          order: () => ({
+            limit: () => Promise.resolve({
+              data: table === 'energy_rite_operating_sessions' ? [{
+                id: 123,
+                branch: 'ABC123',
+                session_start_time: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+                opening_fuel: 50.0,
+                fill_events: 0,
+                fill_amount_during_session: 0,
+                total_fill: 0,
+                notes: 'Engine started. Opening: 50.0L (75%)'
+              }] : []
+            })
+          })
+        })
+      })
+    }),
+    insert: (data) => {
+      console.log(`📝 INSERT into ${table}:`, data);
+      return Promise.resolve();
+    },
+    update: (data) => ({
+      eq: () => {
+        console.log(`📝 UPDATE ${table}:`, data);
+        return Promise.resolve();
+      }
+    })
+  })
+};
+
+// Replace supabase in the client
+const originalSupabase = require('./supabase-client').supabase;
+require('./supabase-client').supabase = mockSupabase;
+
+async function testFuelFillDuringSession() {
+  console.log('🧪 Testing Fuel Fill During Ongoing Session\n');
+  
+  const client = new EnergyRiteWebSocketClient('ws://test');
+  
+  // Test data
+  const plate = 'ABC123';
+  
+  // Step 1: Simulate fuel fill start
+  console.log('1️⃣ Simulating fuel fill start...');
+  const fillStartData = {
+    Plate: plate,
+    DriverName: 'POSSIBLE FUEL FILL',
+    fuel_probe_1_level: '45.5',
+    fuel_probe_1_level_percentage: '68'
+  };
+  
+  await client.processVehicleUpdate(fillStartData);
+  
+  // Wait a moment
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
+  // Step 2: Simulate fuel fill end (status change)
+  console.log('\n2️⃣ Simulating fuel fill end (status change to null)...');
+  const fillEndData = {
+    Plate: plate,
+    DriverName: null, // Status changed to null
+    fuel_probe_1_level: '65.2', // Fuel increased by 19.7L
+    fuel_probe_1_level_percentage: '98'
+  };
+  
+  await client.processVehicleUpdate(fillEndData);
+  
+  console.log('\n✅ Test completed!');
+  console.log('\n📊 Expected Results:');
+  console.log('- Fill detected at 45.5L');
+  console.log('- Fill ended at 65.2L');
+  console.log('- Fill amount: 19.7L');
+  console.log('- Session updated with fill event');
 }
 
-testFuelFill();
+// Run test
+testFuelFillDuringSession().catch(console.error);

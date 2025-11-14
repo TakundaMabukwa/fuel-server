@@ -54,7 +54,18 @@ class EnergyRiteWebSocketClient {
     try {
       // console.log(`📊 Processing vehicle data for ${vehicleData.Plate}`);
       
-      // Check for fuel fills first
+      // Process fuel fills FIRST (independent of sessions)
+      const fuelFillStatus = this.parseFuelFillStatus(vehicleData.DriverName);
+      if (fuelFillStatus === 'FILL') {
+        await this.handleFuelFillEvent(vehicleData.Plate, vehicleData);
+      } else if (fuelFillStatus === 'END' || fuelFillStatus === 'OTHER') {
+        await this.handleFuelFillEnd(vehicleData.Plate, vehicleData);
+      }
+      
+      // Check for fuel fill completion (monitor ongoing fills)
+      await this.checkFuelFillCompletion(vehicleData.Plate, vehicleData);
+      
+      // Check for fuel fills using existing detector (keep existing functionality)
       if (vehicleData.fuel_probe_1_level) {
         const fillResult = await detectFuelFill(
           vehicleData.Plate, 
@@ -67,7 +78,7 @@ class EnergyRiteWebSocketClient {
         }
       }
       
-      // Process engine status changes
+      // Process engine status changes (separate from fuel fills)
       const engineStatus = this.parseEngineStatus(vehicleData.DriverName);
       if (engineStatus) {
         await this.handleSessionChange(vehicleData.Plate, engineStatus, vehicleData);
@@ -92,6 +103,23 @@ class EnergyRiteWebSocketClient {
     } else {
       console.error('❌ Max reconnection attempts reached');
     }
+  }
+
+  parseFuelFillStatus(driverName) {
+    if (!driverName || driverName.trim() === '') return 'END';
+    
+    const normalized = driverName.replace(/\s+/g, ' ').trim().toUpperCase();
+    
+    // Check for fuel fill patterns (case insensitive)
+    if (normalized.includes('POSSIBLE FUEL FILL') ||
+        normalized.includes('FUEL FILL') ||
+        normalized.includes('REFUEL') ||
+        normalized.includes('FILLING')) {
+      console.log('⛽ Fuel fill detected:', driverName);
+      return 'FILL';
+    }
+    
+    return 'OTHER';
   }
 
   parseEngineStatus(driverName) {
@@ -297,6 +325,106 @@ class EnergyRiteWebSocketClient {
   }
 
 
+
+  async handleFuelFillEvent(plate, vehicleData) {
+    try {
+      const currentTime = new Date();
+      const preFillLevel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
+      const preFillPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
+      
+      console.log(`⛽ Fuel fill detected for ${plate} - Pre-fill: ${preFillLevel}L (${preFillPercentage}%)`);
+      
+      if (!this.fuelFillTracking) this.fuelFillTracking = new Map();
+      
+      this.fuelFillTracking.set(plate, {
+        preFillLevel,
+        preFillPercentage,
+        fillStartTime: currentTime,
+        isTracking: true
+      });
+      
+    } catch (error) {
+      console.error(`❌ Error handling fuel fill start for ${plate}:`, error.message);
+    }
+  }
+
+  async handleFuelFillEnd(plate, vehicleData) {
+    try {
+      if (!this.fuelFillTracking?.has(plate)) return;
+      
+      const tracking = this.fuelFillTracking.get(plate);
+      if (!tracking.isTracking) return;
+      
+      const currentFuelLevel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
+      const currentFuelPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
+      const fillAmount = Math.max(0, currentFuelLevel - tracking.preFillLevel);
+      const currentTime = new Date();
+      const fillDuration = (currentTime - tracking.fillStartTime) / 1000;
+      
+      console.log(`⛽ Fuel fill ended for ${plate}: +${fillAmount.toFixed(1)}L`);
+      
+      if (fillAmount > 5) { // Only record significant fills
+        // Get vehicle info
+        const { data: vehicleInfo } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('cost_code, company')
+          .eq('plate', plate)
+          .single();
+        
+        // Create fuel fill session in operating_sessions
+        await supabase.from('energy_rite_operating_sessions').insert({
+          branch: plate,
+          company: vehicleInfo?.company || 'KFC',
+          cost_code: vehicleInfo?.cost_code,
+          session_date: currentTime.toISOString().split('T')[0],
+          session_start_time: tracking.fillStartTime.toISOString(),
+          session_end_time: currentTime.toISOString(),
+          operating_hours: fillDuration / 3600,
+          opening_fuel: tracking.preFillLevel,
+          opening_percentage: tracking.preFillPercentage,
+          closing_fuel: currentFuelLevel,
+          closing_percentage: currentFuelPercentage,
+          total_fill: fillAmount,
+          session_status: 'FUEL_FILL',
+          notes: `Fuel Fill: +${fillAmount.toFixed(1)}L (${tracking.preFillLevel}L → ${currentFuelLevel}L) Duration: ${fillDuration.toFixed(0)}s`
+        });
+        
+        console.log(`⛽ Fuel fill session created: ${plate} +${fillAmount.toFixed(1)}L`);
+        
+        // Also update any ongoing engine session
+        const { data: ongoingSessions } = await supabase
+          .from('energy_rite_operating_sessions')
+          .select('*')
+          .eq('branch', plate)
+          .eq('session_status', 'ONGOING')
+          .order('session_start_time', { ascending: false })
+          .limit(1);
+          
+        if (ongoingSessions && ongoingSessions.length > 0) {
+          const session = ongoingSessions[0];
+          await supabase
+            .from('energy_rite_operating_sessions')
+            .update({
+              fill_events: (session.fill_events || 0) + 1,
+              fill_amount_during_session: (session.fill_amount_during_session || 0) + fillAmount,
+              total_fill: (session.total_fill || 0) + fillAmount,
+              notes: `${session.notes || ''} | Fill: +${fillAmount.toFixed(1)}L at ${currentTime.toLocaleTimeString()}`
+            })
+            .eq('id', session.id);
+        }
+      }
+      
+      this.fuelFillTracking.delete(plate);
+      
+    } catch (error) {
+      console.error(`❌ Error handling fuel fill end for ${plate}:`, error.message);
+    }
+  }
+
+  async checkFuelFillCompletion(plate, vehicleData) {
+    // This method is now mainly for backup/timeout scenarios
+    // Primary detection is through status change
+  }
 
   close() {
     if (this.ws) {
