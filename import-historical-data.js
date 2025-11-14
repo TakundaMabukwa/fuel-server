@@ -47,12 +47,6 @@ async function importHistoricalData() {
 async function processExcelFile(filePath, fileName) {
   console.log(`📄 Processing: ${fileName}`);
   
-  // Only process Daily .xlsx
-  if (!fileName.includes('Daily ')) {
-    console.log(`⚠️ Skipping ${fileName} - only processing Daily .xlsx`);
-    return;
-  }
-  
   try {
     const workbook = XLSX.readFile(filePath);
     const sheetName = workbook.SheetNames[0];
@@ -64,7 +58,7 @@ async function processExcelFile(filePath, fileName) {
     let importedCount = 0;
     
     for (const row of data) {
-      const sessionData = parseRowData(row, 'WEEKLY-001');
+      const sessionData = parseRowData(row, fileName);
       if (sessionData) {
         await insertHistoricalSession(sessionData);
         importedCount++;
@@ -87,7 +81,7 @@ function getCostCodeFromFilename(fileName) {
   return null;
 }
 
-function parseRowData(row, costCode) {
+function parseRowData(row, fileName) {
   const site = row['FUEL REPORT SUMMARY'];
   const date = row['__EMPTY'];
   const operatingHours = row['__EMPTY_1'];
@@ -107,9 +101,16 @@ function parseRowData(row, costCode) {
   const sessionDate = parseExcelDate(date);
   if (!sessionDate) return null;
   
+  // Set realistic operating times (6 AM start)
   const startTime = new Date(sessionDate);
   startTime.setHours(6, 0, 0, 0);
   const endTime = new Date(startTime.getTime() + (duration * 60 * 60 * 1000));
+  
+  // Ensure end time doesn't exceed 24 hours
+  if (endTime.getDate() !== startTime.getDate()) {
+    endTime.setHours(23, 59, 59, 999);
+    endTime.setDate(startTime.getDate());
+  }
   
   return {
     branch: site.trim(),
@@ -119,49 +120,95 @@ function parseRowData(row, costCode) {
     session_start_time: startTime.toISOString(),
     session_end_time: endTime.toISOString(),
     operating_hours: duration,
-    opening_percentage: parseFloat(row['__EMPTY_2']?.replace('%', '').replace(',', '.')) || 0,
-    opening_fuel: parseFloat(row['__EMPTY_3']?.replace(',', '.')) || 0,
-    closing_percentage: parseFloat(row['__EMPTY_4']?.replace('%', '').replace(',', '.')) || 0,
-    closing_fuel: parseFloat(row['__EMPTY_5']?.replace(',', '.')) || 0,
-    total_usage: parseFloat(row['__EMPTY_6']?.replace(',', '.')) || 0,
-    total_fill: parseFloat(row['__EMPTY_7']?.replace(',', '.')) || 0,
-    liter_usage_per_hour: parseFloat(row['__EMPTY_8']?.replace(',', '.')) || 0,
-    cost_for_usage: parseFloat(row['__EMPTY_9']?.split('=')[1]?.replace(',', '.')) || 0,
+    opening_percentage: Math.round(parseFloat(String(row['__EMPTY_2'] || '0').replace('%', '').replace(',', '.')) * 100) / 100 || 0,
+    opening_fuel: Math.round(parseFloat(String(row['__EMPTY_3'] || '0').replace(',', '.')) * 100) / 100 || 0,
+    closing_percentage: Math.round(parseFloat(String(row['__EMPTY_4'] || '0').replace('%', '').replace(',', '.')) * 100) / 100 || 0,
+    closing_fuel: Math.round(parseFloat(String(row['__EMPTY_5'] || '0').replace(',', '.')) * 100) / 100 || 0,
+    total_usage: Math.round(Math.abs(parseFloat(String(row['__EMPTY_6'] || '0').replace(',', '.')) || 0) * 100) / 100,
+    total_fill: Math.round(Math.abs(parseFloat(String(row['__EMPTY_7'] || '0').replace(',', '.')) || 0) * 100) / 100,
+    liter_usage_per_hour: duration > 0 ? Math.round((Math.abs(parseFloat(String(row['__EMPTY_6'] || '0').replace(',', '.')) || 0) / duration) * 100) / 100 : 0,
+    cost_for_usage: Math.round(Math.abs(parseFloat(String(row['__EMPTY_9'] || '0').split('=')[1]?.replace(',', '.') || String(row['__EMPTY_9'] || '0').replace(',', '.')) || 0) * 100) / 100,
     session_status: 'COMPLETED',
-    notes: 'Imported from Weekly (4).xlsx'
+    notes: `Imported from ${fileName}`
   };
 }
 
 function parseOperatingHours(hoursText) {
   if (!hoursText) return null;
   
-  // Handle numeric values directly
-  const numeric = parseFloat(hoursText);
-  if (!isNaN(numeric) && numeric > 0) return numeric;
+  // Skip summary rows and running time rows
+  if (typeof hoursText === 'string' && 
+      (hoursText.includes('Total Running Hours') || 
+       hoursText.includes('Total Hours') ||
+       hoursText.includes('Running Time') ||
+       hoursText.includes('From:'))) {
+    return null;
+  }
   
   // Handle text formats
   if (typeof hoursText !== 'string') return null;
   
+  let totalHours = 0;
+  
+  // Match hours and minutes patterns - be more specific
   const hourMatch = hoursText.match(/(\d+)\s*hours?/i);
   const minuteMatch = hoursText.match(/(\d+)\s*minutes?/i);
   
-  let totalHours = 0;
-  if (hourMatch) totalHours += parseInt(hourMatch[1]);
-  if (minuteMatch) totalHours += parseInt(minuteMatch[1]) / 60;
+  // If we have both hours and minutes
+  if (hourMatch && minuteMatch) {
+    totalHours = parseInt(hourMatch[1]) + parseInt(minuteMatch[1]) / 60;
+  }
+  // If we only have hours
+  else if (hourMatch && !minuteMatch) {
+    totalHours = parseInt(hourMatch[1]);
+  }
+  // If we only have minutes
+  else if (minuteMatch && !hourMatch) {
+    totalHours = parseInt(minuteMatch[1]) / 60;
+  }
+  // Handle formats like "2:30" (hours:minutes)
+  else {
+    const timeMatch = hoursText.match(/(\d+):(\d+)/);
+    if (timeMatch) {
+      totalHours = parseInt(timeMatch[1]) + parseInt(timeMatch[2]) / 60;
+    }
+    // Handle pure numeric values
+    else {
+      const numeric = parseFloat(hoursText);
+      if (!isNaN(numeric) && numeric > 0) {
+        totalHours = numeric;
+      }
+    }
+  }
   
-  return totalHours > 0 ? totalHours : null;
+  return totalHours > 0 ? Math.round(totalHours * 100) / 100 : null;
 }
 
 function parseExcelDate(dateValue) {
   if (!dateValue) return null;
   
+  // Handle Excel serial date numbers
   if (typeof dateValue === 'number') {
-    return new Date((dateValue - 25569) * 86400 * 1000);
+    const excelEpoch = new Date(1900, 0, 1);
+    const days = dateValue - 2; // Excel counts from 1900-01-01 but has leap year bug
+    return new Date(excelEpoch.getTime() + days * 24 * 60 * 60 * 1000);
   }
   
+  // Handle string dates
   if (typeof dateValue === 'string') {
-    const parsed = new Date(dateValue);
-    if (!isNaN(parsed.getTime())) return parsed;
+    // Try various date formats
+    const formats = [
+      dateValue,
+      dateValue.replace(/\//g, '-'),
+      dateValue.replace(/\./g, '-')
+    ];
+    
+    for (const format of formats) {
+      const parsed = new Date(format);
+      if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1900) {
+        return parsed;
+      }
+    }
   }
   
   return null;
@@ -202,7 +249,7 @@ function getActualCostCode(site) {
     'MEADOWDALE': 'KFC-0001-0001-0003',
     'CARLTONVIL': 'KFC-0001-0001-0003',
     'MOBILE 3': 'KFC-0001-0001-0003',
-    'WOODMEAD': 'KFC-0001-0001-0003-test',
+    'WOODMEAD': 'KFC-0001-0001-0002-0004',
     'NEW MARKET': 'KFC-0001-0001-0003',
     'BLUE HILL': 'KFC-0001-0001-0002-0004',
     'GRAYSTON': 'KFC-0001-0001-0003',
@@ -249,7 +296,20 @@ function getActualCostCode(site) {
     'LIONSPRIDE': 'KFC-0001-0001-0002-0004',
     'OLIEVENHOU': 'KFC-0001-0001-0002-0003',
     'WELKOM': 'KFC-0001-0001-0003',
-    'OAKDALE': 'KFC-0001-0001-0002-0002'
+    'OAKDALE': 'KFC-0001-0001-0002-0002',
+    'SUNVALLEY': 'KFC-0001-0001-0002-0002',
+    'VORNAVALL': 'KFC-0001-0001-0002-0004',
+    'GLENMARAIS': 'KFC-0001-0001-0003',
+    'RUSTENBU3': 'KFC-0001-0001-0002-0005',
+    'SAFARI GAR': 'KFC-0001-0001-0002-0001-0001',
+    'YARONA': 'KFC-0001-0001-0002-0005',
+    'THLABANE': 'KFC-0001-0001-0002-0001-0002',
+    'TRIANGLE': 'KFC-0001-0001-0002-0001-0001',
+    'RUSTENBUR2': 'KFC-0001-0001-0002-0001-0002',
+    'WAVERLY': 'KFC-0001-0001-0002-0005',
+    'KROONSTAD': 'KFC-0001-0001-0003',
+    'WIERDAPARK': 'KFC-0001-0001-0002-0003',
+    'RIVONIA': 'KFC-0001-0001-0002-0004'
   };
   
   return SITE_COST_CODES[site.toUpperCase()] || 'KFC-0001-0001-0003';

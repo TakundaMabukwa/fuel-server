@@ -27,12 +27,8 @@ class EnergyRiteWebSocketClient {
       try {
         const message = JSON.parse(data);
         
-        // Log raw message format (first 5 messages only)
-        if (!this.loggedSamples) this.loggedSamples = 0;
-        if (this.loggedSamples < 5) {
-          console.log('📨 WebSocket message format:', JSON.stringify(message, null, 2));
-          this.loggedSamples++;
-        }
+        // Log full message for every message
+        console.log('📋 Full message:', JSON.stringify(message, null, 2));
         
         // Process energyrite parsed data
         if (message.Plate) {
@@ -40,6 +36,7 @@ class EnergyRiteWebSocketClient {
         }
       } catch (error) {
         console.error('❌ Error processing message:', error);
+        console.log('Raw data that caused error:', data.toString());
       }
     });
 
@@ -55,10 +52,7 @@ class EnergyRiteWebSocketClient {
 
   async processVehicleUpdate(vehicleData) {
     try {
-      console.log(`📊 Processing vehicle data for ${vehicleData.Plate}:`, {
-        driverName: vehicleData.DriverName,
-        fuelLevel: vehicleData.fuel_probe_1_level
-      });
+      // console.log(`📊 Processing vehicle data for ${vehicleData.Plate}`);
       
       // Check for fuel fills first
       if (vehicleData.fuel_probe_1_level) {
@@ -76,10 +70,10 @@ class EnergyRiteWebSocketClient {
       // Process engine status changes
       const engineStatus = this.parseEngineStatus(vehicleData.DriverName);
       if (engineStatus) {
-        await this.handleSessionChange(vehicleData.Plate, engineStatus);
+        await this.handleSessionChange(vehicleData.Plate, engineStatus, vehicleData);
       }
 
-      console.log(`✅ Processed update for vehicle: ${vehicleData.Plate}`);
+      // console.log(`✅ Processed update for vehicle: ${vehicleData.Plate}`);
     } catch (error) {
       console.error('❌ Error processing vehicle update:', error);
     }
@@ -105,8 +99,8 @@ class EnergyRiteWebSocketClient {
     
     const normalized = driverName.replace(/\s+/g, ' ').trim().toUpperCase();
     
-    // Log all driver names for debugging
-    if (Math.random() < 0.1) { // Log 10% of messages
+    // Only log if there's a driver name
+    if (driverName && driverName.trim() !== '') {
       console.log('🔍 DriverName received:', driverName, '-> normalized:', normalized);
     }
     
@@ -163,7 +157,7 @@ class EnergyRiteWebSocketClient {
     }
   }
 
-  async handleSessionChange(plate, engineStatus) {
+  async handleSessionChange(plate, engineStatus, wsMessage = null) {
     try {
       const currentTime = new Date();
       
@@ -172,7 +166,43 @@ class EnergyRiteWebSocketClient {
         try {
           const response = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles');
           const vehicles = response.data.data;
-          return vehicles.find(v => v.branch === plate);
+          
+          console.log(`🔍 Looking for vehicle: ${plate}`);
+          if (wsMessage?.Quality) {
+            console.log(`🔍 WebSocket Quality: ${wsMessage.Quality}`);
+          }
+          
+          // First try to match by both plate and quality (IP)
+          let vehicle = null;
+          if (wsMessage?.Quality) {
+            vehicle = vehicles.find(v => v.branch === plate && v.quality === wsMessage.Quality);
+            if (vehicle) {
+              console.log(`✅ Found exact match by plate + quality: ${plate} (${wsMessage.Quality})`);
+            }
+          }
+          
+          // Fallback to plate-only match if no quality match
+          if (!vehicle) {
+            vehicle = vehicles.find(v => v.branch === plate);
+            if (vehicle) {
+              console.log(`⚠️ Found plate-only match: ${plate} (quality: ${vehicle.quality})`);
+            }
+          }
+          
+          if (!vehicle) {
+            console.log(`❌ No vehicle found for ${plate}`);
+            console.log(`📋 Available vehicles:`, vehicles.map(v => ({branch: v.branch, quality: v.quality})));
+            return null;
+          }
+          
+          console.log(`✅ Using vehicle data:`, {
+            branch: vehicle.branch,
+            quality: vehicle.quality,
+            fuel_level: vehicle.fuel_probe_1_level,
+            company: vehicle.company
+          });
+          
+          return vehicle;
         } catch (error) {
           console.error(`❌ Error getting fuel data for ${plate}:`, error.message);
           return null;

@@ -62,7 +62,7 @@ class EnergyRiteWebSocketClient {
         await this.handleSessionChange(vehicleData.Plate, engineStatus);
       }
 
-      console.log(`✅ Processed update for vehicle: ${vehicleData.Plate}`);
+      // console.log(`✅ Processed update for vehicle: ${vehicleData.Plate}`);
     } catch (error) {
       console.error('❌ Error processing vehicle update:', error);
     }
