@@ -12,7 +12,7 @@ class ReportDistributionService {
     try {
       const { data, error } = await supabase
         .from('energyrite_emails')
-        .select('id, email, recipient_name, branch, email_type, status')
+        .select('id, email, recipient_name, branch, cost_code, email_type, status')
         .eq('status', 'active')
         .order('branch');
       
@@ -42,7 +42,7 @@ class ReportDistributionService {
       // Group recipients by cost code
       const recipientsByCostCode = {};
       recipients.forEach(recipient => {
-        const costCode = recipient.branch || 'ALL';
+        const costCode = recipient.cost_code || recipient.branch || 'ALL';
         if (!recipientsByCostCode[costCode]) {
           recipientsByCostCode[costCode] = [];
         }
@@ -188,7 +188,7 @@ class ReportDistributionService {
           });
 
           // Send email to all recipients for this cost code
-          const emailAddresses = costCodeRecipients.map(r => r.recipient_email);
+          const emailAddresses = costCodeRecipients.map(r => r.email);
           
           const emailResult = await emailService.sendReportEmail({
             reportType: 'activity',
@@ -218,7 +218,7 @@ class ReportDistributionService {
           console.error(`❌ Error processing activity report for ${costCode}:`, error.message);
           results.push({
             cost_code: costCode,
-            recipients: costCodeRecipients.map(r => r.recipient_email),
+            recipients: costCodeRecipients.map(r => r.email),
             report_generated: false,
             email_sent: false,
             error: error.message

@@ -122,7 +122,7 @@ class EnergyRiteReportDistributionController {
         }
         groupedRecipients[costCode].push({
           id: recipient.id,
-          email: recipient.recipient_email,
+          email: recipient.email,
           name: recipient.recipient_name,
           email_type: recipient.email_type
         });
@@ -190,7 +190,7 @@ class EnergyRiteReportDistributionController {
           message: `Test ${reportType} report sent successfully`,
           data: {
             cost_code: costCode,
-            recipients: testRecipients.map(r => r.recipient_email),
+            recipients: testRecipients.map(r => r.email),
             report_generated: true,
             email_sent: emailResult.success,
             file_name: reportResult.file_name,
