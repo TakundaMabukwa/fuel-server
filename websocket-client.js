@@ -54,16 +54,8 @@ class EnergyRiteWebSocketClient {
     try {
       // console.log(`📊 Processing vehicle data for ${vehicleData.Plate}`);
       
-      // Process fuel fills FIRST (independent of sessions)
-      const fuelFillStatus = this.parseFuelFillStatus(vehicleData.DriverName);
-      if (fuelFillStatus === 'FILL') {
-        await this.handleFuelFillEvent(vehicleData.Plate, vehicleData);
-      } else if (fuelFillStatus === 'END' || fuelFillStatus === 'OTHER') {
-        await this.handleFuelFillEnd(vehicleData.Plate, vehicleData);
-      }
-      
-      // Check for fuel fill completion (monitor ongoing fills)
-      await this.checkFuelFillCompletion(vehicleData.Plate, vehicleData);
+      // NEW: Independent fuel fill session tracking
+      await this.handleFuelFillSession(vehicleData.Plate, vehicleData.DriverName, vehicleData);
       
       // Check for fuel fills using existing detector (keep existing functionality)
       if (vehicleData.fuel_probe_1_level) {
@@ -105,21 +97,101 @@ class EnergyRiteWebSocketClient {
     }
   }
 
-  parseFuelFillStatus(driverName) {
-    if (!driverName || driverName.trim() === '') return 'END';
+  isFuelFillStatus(driverName) {
+    if (!driverName || driverName.trim() === '') return false;
     
     const normalized = driverName.replace(/\s+/g, ' ').trim().toUpperCase();
     
-    // Check for fuel fill patterns (case insensitive)
-    if (normalized.includes('POSSIBLE FUEL FILL') ||
-        normalized.includes('FUEL FILL') ||
-        normalized.includes('REFUEL') ||
-        normalized.includes('FILLING')) {
-      console.log('⛽ Fuel fill detected:', driverName);
-      return 'FILL';
+    return normalized.includes('POSSIBLE FUEL FILL') ||
+           normalized.includes('FUEL FILL') ||
+           normalized.includes('REFUEL') ||
+           normalized.includes('FILLING');
+  }
+
+  async handleFuelFillSession(plate, driverName, vehicleData) {
+    try {
+      if (!this.fuelFillSessions) this.fuelFillSessions = new Map();
+      
+      const isFillStatus = this.isFuelFillStatus(driverName);
+      const hasOngoingFill = this.fuelFillSessions.has(plate);
+      
+      if (isFillStatus && !hasOngoingFill) {
+        // Start new fuel fill session
+        const initialFuel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
+        const initialPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
+        
+        this.fuelFillSessions.set(plate, {
+          startTime: new Date(),
+          initialFuel,
+          initialPercentage,
+          status: 'ONGOING'
+        });
+        
+        console.log(`⛽ Fuel fill session started for ${plate} - Initial: ${initialFuel}L (${initialPercentage}%)`);
+        
+        await supabase.from('energy_rite_activity_log').insert({
+          branch: plate,
+          activity_type: 'FUEL_FILL_SESSION_START',
+          activity_time: new Date().toISOString(),
+          notes: `Fuel fill session started - Initial: ${initialFuel}L (${initialPercentage}%)`
+        });
+        
+      } else if (!isFillStatus && hasOngoingFill) {
+        // End fuel fill session
+        const session = this.fuelFillSessions.get(plate);
+        const finalFuel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
+        const finalPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
+        const fillAmount = Math.max(0, finalFuel - session.initialFuel);
+        const duration = (new Date() - session.startTime) / 1000;
+        
+        console.log(`⛽ Fuel fill session ended for ${plate}:`);
+        console.log(`  Initial: ${session.initialFuel}L (${session.initialPercentage}%)`);
+        console.log(`  Final: ${finalFuel}L (${finalPercentage}%)`);
+        console.log(`  Amount filled: ${fillAmount.toFixed(1)}L`);
+        console.log(`  Duration: ${duration.toFixed(0)}s`);
+        
+        await supabase.from('energy_rite_activity_log').insert({
+          branch: plate,
+          activity_type: 'FUEL_FILL_SESSION_COMPLETE',
+          activity_time: new Date().toISOString(),
+          notes: `Fuel fill: +${fillAmount.toFixed(1)}L (${session.initialFuel}L → ${finalFuel}L) in ${duration.toFixed(0)}s`
+        });
+        
+        // Update ongoing engine session if exists
+        if (fillAmount > 0) {
+          const { data: ongoingSessions } = await supabase
+            .from('energy_rite_operating_sessions')
+            .select('*')
+            .eq('branch', plate)
+            .eq('session_status', 'ONGOING')
+            .order('session_start_time', { ascending: false })
+            .limit(1);
+            
+          if (ongoingSessions && ongoingSessions.length > 0) {
+            const engineSession = ongoingSessions[0];
+            const currentFillEvents = engineSession.fill_events || 0;
+            const currentFillAmount = engineSession.fill_amount_during_session || 0;
+            
+            await supabase
+              .from('energy_rite_operating_sessions')
+              .update({
+                fill_events: currentFillEvents + 1,
+                fill_amount_during_session: currentFillAmount + fillAmount,
+                total_fill: (engineSession.total_fill || 0) + fillAmount,
+                notes: `${engineSession.notes || ''} | Fill: +${fillAmount.toFixed(1)}L at ${new Date().toLocaleTimeString()}`
+              })
+              .eq('id', engineSession.id);
+              
+            console.log(`🔋 Updated engine session ${engineSession.id} with fill: +${fillAmount.toFixed(1)}L`);
+          }
+        }
+        
+        this.fuelFillSessions.delete(plate);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error handling fuel fill session for ${plate}:`, error.message);
     }
-    
-    return 'OTHER';
   }
 
   parseEngineStatus(driverName) {
