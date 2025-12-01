@@ -7,13 +7,13 @@ const { supabase } = require('../supabase-client');
 
 const FUEL_FILL_CONFIG = {
     // Minimum fuel increase to consider as a fill (in liters)
-    MIN_FILL_AMOUNT: 20,
+    MIN_FILL_AMOUNT: 0.1,
     
     // Maximum time window for fill detection (in minutes)
-    MAX_TIME_WINDOW: 60,
+    MAX_TIME_WINDOW: 120,
     
     // Minimum percentage increase to consider
-    MIN_PERCENTAGE_INCREASE: 15
+    MIN_PERCENTAGE_INCREASE: 0.1
 };
 
 /**
@@ -25,29 +25,43 @@ const FUEL_FILL_CONFIG = {
  */
 async function detectFuelFill(plate, currentFuelLevel, driverName) {
     try {
-        if (!currentFuelLevel || currentFuelLevel <= 0) {
+        // Parse and validate current fuel level
+        const parsedCurrentFuel = parseFloat(currentFuelLevel);
+        if (!parsedCurrentFuel || parsedCurrentFuel <= 0 || isNaN(parsedCurrentFuel)) {
             return { isFill: false, reason: 'Invalid fuel level' };
         }
 
-        // Check if "Possible Fuel Fill" is in driver name
-        const hasFillStatus = driverName && driverName.toLowerCase().includes('possible fuel fill');
+        // Check if "Possible Fuel Fill" or "Fuel Fill" is in driver name
+        const hasFillStatus = driverName && (
+            driverName.toLowerCase().includes('possible fuel fill') ||
+            driverName.toLowerCase().includes('fuel fill') ||
+            driverName.toLowerCase().includes('refuel') ||
+            driverName.toLowerCase().includes('filling')
+        );
 
-        // Get recent fuel data for comparison
+        // Get recent fuel data for comparison (filter out null values)
         const { data: recentData, error } = await supabase
             .from('energy_rite_fuel_data')
             .select('*')
             .eq('plate', plate)
+            .not('fuel_probe_1_level', 'is', null)
             .order('created_at', { ascending: false })
-            .limit(5);
+            .limit(10);
 
         if (error) throw new Error(`Database error: ${error.message}`);
 
-        if (recentData.length < 2) {
-            return { isFill: false, reason: 'Insufficient data for comparison' };
+        // Filter out entries with null or invalid fuel levels
+        const validData = recentData.filter(entry => {
+            const fuel = parseFloat(entry.fuel_probe_1_level);
+            return fuel && fuel > 0 && !isNaN(fuel);
+        });
+
+        if (validData.length < 2) {
+            return { isFill: false, reason: 'Insufficient valid data for comparison' };
         }
 
-        const current = recentData[0];
-        const previous = recentData[1];
+        const current = validData[0];
+        const previous = validData[1];
         const currentTime = new Date();
         const previousTime = new Date(previous.created_at);
 
@@ -59,8 +73,8 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
             return { isFill: false, reason: 'Time gap too large' };
         }
 
-        const previousFuel = parseFloat(previous.fuel_probe_1_level || 0);
-        const currentFuel = parseFloat(current.fuel_probe_1_level || 0);
+        const previousFuel = parseFloat(previous.fuel_probe_1_level);
+        const currentFuel = parseFloat(current.fuel_probe_1_level);
         const fuelIncrease = currentFuel - previousFuel;
         const fuelIncreasePercentage = previousFuel > 0 ? (fuelIncrease / previousFuel) * 100 : 0;
 
@@ -69,11 +83,13 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
             significantIncrease: fuelIncrease >= FUEL_FILL_CONFIG.MIN_FILL_AMOUNT,
             percentageIncrease: fuelIncreasePercentage >= FUEL_FILL_CONFIG.MIN_PERCENTAGE_INCREASE,
             withinTimeWindow: timeDiffMinutes <= FUEL_FILL_CONFIG.MAX_TIME_WINDOW,
-            statusIndicatesFill: hasFillStatus
+            statusIndicatesFill: hasFillStatus,
+            positiveIncrease: fuelIncrease > 0
         };
 
-        const isFill = (fillConditions.significantIncrease && fillConditions.percentageIncrease) || 
-                      fillConditions.statusIndicatesFill;
+        // Detect any positive fuel increase OR status indication
+        const isFill = fillConditions.statusIndicatesFill || 
+                      (fillConditions.positiveIncrease && fillConditions.withinTimeWindow);
 
         if (isFill) {
             // Get cost code and company for this vehicle

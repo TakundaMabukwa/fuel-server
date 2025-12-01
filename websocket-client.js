@@ -12,9 +12,15 @@ class EnergyRiteWebSocketClient {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
     this.onOffDetector = new ImprovedOnOffDetection();
+    this.testMode = wsUrl === 'dummy';
   }
 
   connect() {
+    if (this.testMode) {
+      console.log('🧪 Test mode - skipping WebSocket connection');
+      return;
+    }
+    
     console.log(`🔌 Connecting to WebSocket: ${this.wsUrl}`);
     this.ws = new WebSocket(this.wsUrl);
 
@@ -53,6 +59,11 @@ class EnergyRiteWebSocketClient {
   async processVehicleUpdate(vehicleData) {
     try {
       // console.log(`📊 Processing vehicle data for ${vehicleData.Plate}`);
+      
+      // Store fuel data for detection (ensure we have data to compare)
+      if (vehicleData.fuel_probe_1_level && vehicleData.fuel_probe_1_level !== null) {
+        await this.storeFuelData(vehicleData);
+      }
       
       // NEW: Independent fuel fill session tracking
       await this.handleFuelFillSession(vehicleData.Plate, vehicleData.DriverName, vehicleData);
@@ -106,6 +117,25 @@ class EnergyRiteWebSocketClient {
            normalized.includes('FUEL FILL') ||
            normalized.includes('REFUEL') ||
            normalized.includes('FILLING');
+  }
+
+  async storeFuelData(vehicleData) {
+    try {
+      const fuelLevel = parseFloat(vehicleData.fuel_probe_1_level);
+      const fuelPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage);
+      
+      if (isNaN(fuelLevel) || fuelLevel <= 0) return;
+      
+      await supabase.from('energy_rite_fuel_data').insert({
+        plate: vehicleData.Plate,
+        fuel_probe_1_level: fuelLevel,
+        fuel_probe_1_level_percentage: fuelPercentage,
+        created_at: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error(`❌ Error storing fuel data for ${vehicleData.Plate}:`, error.message);
+    }
   }
 
   async handleFuelFillSession(plate, driverName, vehicleData) {

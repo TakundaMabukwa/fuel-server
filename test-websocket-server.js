@@ -1,150 +1,110 @@
 const WebSocket = require('ws');
 
-// Create WebSocket server on port 8006 for testing
-const wss = new WebSocket.Server({ port: 8006 });
-
-console.log('🧪 Test WebSocket Server started on ws://localhost:8006');
-
-const testData = [
-  // 1. Engine starts
-  {
-    "Plate": "EBONY",
-    "Speed": 0,
-    "Latitude": -26.004057,
-    "Longitude": 28.17784,
-    "LocTime": "4055",
-    "Quality": "60.115.1.10",
-    "Mileage": null,
-    "Pocsagstr": "",
-    "Head": "",
-    "Geozone": "1031 29 September Dr, Ebony Park, Midrand, 1690, South Africa",
-    "DriverName": "ENGINE ON",
-    "NameEvent": "",
-    "Temperature": "",
-    "fuel_probe_1_level": "45.0",
-    "fuel_probe_1_level_percentage": "67"
-  },
-  // 2. Normal operation
-  {
-    "Plate": "EBONY",
-    "Speed": 15,
-    "Latitude": -26.004057,
-    "Longitude": 28.17784,
-    "LocTime": "4056",
-    "Quality": "60.115.1.10",
-    "Mileage": null,
-    "Pocsagstr": "",
-    "Head": "",
-    "Geozone": "1031 29 September Dr, Ebony Park, Midrand, 1690, South Africa",
-    "DriverName": "RUNNING",
-    "NameEvent": "",
-    "Temperature": "",
-    "fuel_probe_1_level": "43.8",
-    "fuel_probe_1_level_percentage": "65"
-  },
-  // 3. Fuel fill starts
-  {
-    "Plate": "EBONY",
-    "Speed": 0,
-    "Latitude": -26.004057,
-    "Longitude": 28.17784,
-    "LocTime": "4057",
-    "Quality": "60.115.1.10",
-    "Mileage": null,
-    "Pocsagstr": "",
-    "Head": "",
-    "Geozone": "1031 29 September Dr, Ebony Park, Midrand, 1690, South Africa",
-    "DriverName": "POSSIBLE FUEL FILL",
-    "NameEvent": "",
-    "Temperature": "",
-    "fuel_probe_1_level": "42.5",
-    "fuel_probe_1_level_percentage": "63"
-  },
-  // 4. Fuel fill ends (DriverName becomes empty)
-  {
-    "Plate": "EBONY",
-    "Speed": 0,
-    "Latitude": -26.004057,
-    "Longitude": 28.17784,
-    "LocTime": "4058",
-    "Quality": "60.115.1.10",
-    "Mileage": null,
-    "Pocsagstr": "",
-    "Head": "",
-    "Geozone": "1031 29 September Dr, Ebony Park, Midrand, 1690, South Africa",
-    "DriverName": "",
-    "NameEvent": "",
-    "Temperature": "",
-    "fuel_probe_1_level": "68.2",
-    "fuel_probe_1_level_percentage": "95"
-  },
-  // 5. Continue operation
-  {
-    "Plate": "EBONY",
-    "Speed": 20,
-    "Latitude": -26.004057,
-    "Longitude": 28.17784,
-    "LocTime": "4059",
-    "Quality": "60.115.1.10",
-    "Mileage": null,
-    "Pocsagstr": "",
-    "Head": "",
-    "Geozone": "1031 29 September Dr, Ebony Park, Midrand, 1690, South Africa",
-    "DriverName": "RUNNING",
-    "NameEvent": "",
-    "Temperature": "",
-    "fuel_probe_1_level": "67.5",
-    "fuel_probe_1_level_percentage": "94"
-  },
-  // 6. Engine stops
-  {
-    "Plate": "EBONY",
-    "Speed": 0,
-    "Latitude": -26.004057,
-    "Longitude": 28.17784,
-    "LocTime": "4060",
-    "Quality": "60.115.1.10",
-    "Mileage": null,
-    "Pocsagstr": "",
-    "Head": "",
-    "Geozone": "1031 29 September Dr, Ebony Park, Midrand, 1690, South Africa",
-    "DriverName": "ENGINE OFF",
-    "NameEvent": "",
-    "Temperature": "",
-    "fuel_probe_1_level": "66.8",
-    "fuel_probe_1_level_percentage": "93"
+class TestWebSocketServer {
+  constructor(port = 8006) {
+    this.port = port;
+    this.server = null;
+    this.clients = new Set();
+    this.vehicles = [
+      { plate: 'KEYWEST', fuel: 121.6, percentage: 50 },
+      { plate: 'ALEX', fuel: 185.7, percentage: 84 },
+      { plate: 'BLOEM2', fuel: 315, percentage: 100 },
+      { plate: 'DURBANVILL', fuel: 200, percentage: 75 },
+      { plate: 'BERGBRON', fuel: 150, percentage: 60 }
+    ];
   }
-];
 
-wss.on('connection', (ws) => {
-  console.log('✅ Client connected to test server');
-  
-  let messageIndex = 0;
-  
-  // Send test messages every 3 seconds
-  const interval = setInterval(() => {
-    if (messageIndex < testData.length) {
-      const message = testData[messageIndex];
-      console.log(`📤 Sending message ${messageIndex + 1}/${testData.length}: ${message.DriverName || 'No status'}`);
-      ws.send(JSON.stringify(message));
-      messageIndex++;
-    } else {
-      console.log('✅ All test messages sent');
-      clearInterval(interval);
+  start() {
+    try {
+      this.server = new WebSocket.Server({ port: this.port });
+    } catch (error) {
+      if (error.code === 'EADDRINUSE') {
+        console.log(`⚠️ Port ${this.port} already in use, skipping server start`);
+        return;
+      }
+      throw error;
     }
-  }, 3000);
-  
-  ws.on('close', () => {
-    console.log('❌ Client disconnected');
-    clearInterval(interval);
-  });
-});
+    
+    this.server.on('connection', (ws) => {
+      console.log(`✅ Client connected to test server on port ${this.port}`);
+      this.clients.add(ws);
+      
+      ws.on('close', () => {
+        console.log('❌ Client disconnected from test server');
+        this.clients.delete(ws);
+      });
+    });
 
-console.log('📋 Test sequence:');
-console.log('1. ENGINE ON (45.0L)');
-console.log('2. RUNNING (43.8L)');
-console.log('3. POSSIBLE FUEL FILL (42.5L)');
-console.log('4. Fill ends - empty status (68.2L) = +25.7L');
-console.log('5. RUNNING (67.5L)');
-console.log('6. ENGINE OFF (66.8L)');
-console.log('\n🔌 Connect your client to: ws://localhost:8006');
+    console.log(`🚀 Test WebSocket server started on port ${this.port}`);
+    this.startDataSimulation();
+  }
+
+  startDataSimulation() {
+    let step = 0;
+    
+    setInterval(() => {
+      step++;
+      
+      this.vehicles.forEach((vehicle, index) => {
+        let driverName = '';
+        let fuelChange = 0;
+        
+        // Simulate fuel fill for KEYWEST every 30 steps
+        if (vehicle.plate === 'KEYWEST') {
+          if (step % 30 === 5) {
+            driverName = 'Possible Fuel Fill Detected';
+          } else if (step % 30 >= 6 && step % 30 <= 15) {
+            driverName = 'Fuel Fill In Progress';
+            fuelChange = Math.random() * 3 + 1; // 1-4L increase
+          } else if (step % 30 === 16) {
+            driverName = 'Normal Operation';
+          }
+        }
+        
+        // Simulate fuel consumption for all vehicles
+        if (!driverName.includes('Fill')) {
+          fuelChange = -(Math.random() * 0.5); // Small consumption
+        }
+        
+        vehicle.fuel += fuelChange;
+        vehicle.fuel = Math.max(10, Math.min(350, vehicle.fuel));
+        vehicle.percentage = Math.round((vehicle.fuel / 350) * 100);
+        
+        const message = {
+          Plate: vehicle.plate,
+          Speed: Math.floor(Math.random() * 60),
+          Latitude: -26.088094 + (Math.random() - 0.5) * 0.1,
+          Longitude: 27.782602 + (Math.random() - 0.5) * 0.1,
+          LocTime: Date.now().toString(),
+          Quality: "61.13.2.21",
+          Mileage: null,
+          Pocsagstr: "",
+          Head: "",
+          Geozone: "Test Location, Johannesburg, South Africa",
+          DriverName: driverName,
+          NameEvent: "",
+          Temperature: "25,405,1004,2020,0741,2021,05A5,2022,14,2023,54",
+          fuel_probe_1_level: parseFloat(vehicle.fuel.toFixed(1)),
+          fuel_probe_1_volume_in_tank: vehicle.fuel * 2,
+          fuel_probe_1_temperature: 20 + Math.random() * 10,
+          fuel_probe_1_level_percentage: vehicle.percentage,
+          message_type: 405
+        };
+        
+        this.broadcast(JSON.stringify(message));
+      });
+      
+    }, 3000); // Every 3 seconds
+  }
+
+  broadcast(message) {
+    this.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+}
+
+const testServer = new TestWebSocketServer(8006);
+testServer.start();
