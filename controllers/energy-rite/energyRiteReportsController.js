@@ -307,6 +307,15 @@ function calculateShiftUsageFromSnapshots(timePeriodsData, siteData) {
 
 class EnergyRiteReportsController {
   
+  // Helper function to format duration from hours to HH:MM:SS format
+  formatDuration(hours) {
+    const totalSeconds = Math.round(hours * 3600);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+  
   // Get today's sessions
   async getTodaysSessions(req, res) {
     try {
@@ -2023,29 +2032,38 @@ class EnergyRiteReportsController {
       infoCell.alignment = { horizontal: 'center' };
       
       // Column headers (matching getDailyReport data structure)
-      const headers = ['Branch', 'Company', 'Cost Code', 'Current Fuel', 'Engine Status', 'Running Hours', 'Fuel Usage', 'Total Cost'];
+      const headers = ['Branch', 'Company', 'Cost Code', 'Current Fuel', 'Engine Status', 'Duration (H:M:S)', 'Fuel Usage', 'Total Cost', 'Start Time', 'End Time'];
       overviewSheet.addRow([]); // Empty row
       const headerRow = overviewSheet.addRow(headers);
       headerRow.font = { bold: true };
       
       // Data rows
       report.sites.forEach(site => {
+        const formattedDuration = this.formatDuration(site.daily_data.total_running_hours);
+        const startTime = site.daily_data.first_session_start ? 
+          new Date(site.daily_data.first_session_start).toLocaleString() : 'No sessions';
+        const endTime = site.daily_data.last_session ? 
+          new Date(site.daily_data.last_session).toLocaleString() : 'No sessions';
         overviewSheet.addRow([
           site.branch,
           site.company,
           site.cost_code,
           site.current_fuel_level,
           site.current_engine_status,
-          site.daily_data.total_running_hours,
+          formattedDuration,
           site.daily_data.total_fuel_usage,
-          site.daily_data.total_cost
+          site.daily_data.total_cost,
+          startTime,
+          endTime
         ]);
       });
       
-      // Auto-fit columns
-      overviewSheet.columns.forEach(column => {
+      // Auto-fit columns with specific widths for time columns
+      overviewSheet.columns.forEach((column, index) => {
         if (column.header) {
-          column.width = Math.max(column.header.length + 2, 15);
+          // Make time columns wider
+          const isTimeColumn = index >= 8; // Start Time and End Time columns
+          column.width = isTimeColumn ? 20 : Math.max(column.header.length + 2, 15);
         }
       });
 

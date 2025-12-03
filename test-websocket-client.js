@@ -1,10 +1,10 @@
 const EnergyRiteWebSocketClient = require('./websocket-client');
 
 console.log('🧪 Starting WebSocket Client Test');
-console.log('📡 Connecting to test server: ws://localhost:8006\n');
+console.log('📡 Connecting to test server: ws://localhost:8008\n');
 
 // Create client that connects to our test server
-const client = new EnergyRiteWebSocketClient('ws://localhost:8006');
+const client = new EnergyRiteWebSocketClient('ws://localhost:8008');
 
 // Start the connection
 client.connect();

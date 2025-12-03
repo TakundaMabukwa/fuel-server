@@ -291,7 +291,7 @@ class EnergyRiteExcelReportGenerator {
         }
       });
       
-      const sites = Object.values(siteGroups);
+      const sites = Object.values(siteGroups).sort((a, b) => a.branch.localeCompare(b.branch));
       const totalSessions = sessions.length;
       const totalOperatingHours = sites.reduce((sum, site) => sum + site.total_operating_hours, 0);
       

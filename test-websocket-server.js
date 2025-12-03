@@ -106,5 +106,5 @@ class TestWebSocketServer {
   }
 }
 
-const testServer = new TestWebSocketServer(8006);
+const testServer = new TestWebSocketServer(8007);
 testServer.start();
