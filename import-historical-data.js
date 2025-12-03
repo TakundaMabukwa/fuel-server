@@ -125,7 +125,7 @@ function parseRowData(row, fileName) {
     closing_percentage: Math.round(parseFloat(String(row['__EMPTY_4'] || '0').replace('%', '').replace(',', '.')) * 100) / 100 || 0,
     closing_fuel: Math.round(parseFloat(String(row['__EMPTY_5'] || '0').replace(',', '.')) * 100) / 100 || 0,
     total_usage: Math.round(Math.abs(parseFloat(String(row['__EMPTY_6'] || '0').replace(',', '.')) || 0) * 100) / 100,
-    total_fill: Math.round(Math.abs(parseFloat(String(row['__EMPTY_7'] || '0').replace(',', '.')) || 0) * 100) / 100,
+    total_fill: Math.round(Math.abs(parseFloat(String(row['Total Fill'] || row['__EMPTY_7'] || '0').replace(',', '.')) || 0) * 100) / 100,
     liter_usage_per_hour: duration > 0 ? Math.round((Math.abs(parseFloat(String(row['__EMPTY_6'] || '0').replace(',', '.')) || 0) / duration) * 100) / 100 : 0,
     cost_for_usage: Math.round(Math.abs(parseFloat(String(row['__EMPTY_9'] || '0').split('=')[1]?.replace(',', '.') || String(row['__EMPTY_9'] || '0').replace(',', '.')) || 0) * 100) / 100,
     session_status: 'COMPLETED',

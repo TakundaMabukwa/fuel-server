@@ -471,11 +471,16 @@ class EnergyRiteExcelReportGenerator {
       // Add individual session rows for all sessions (single or multiple)
       if (site.sessions.length > 0) {
         for (const session of site.sessions) {
+          const startTime = new Date(session.session_start_time).toLocaleTimeString('en-GB', { hour12: false });
+          const endTime = new Date(session.session_end_time).toLocaleTimeString('en-GB', { hour12: false });
+          const timeRange = `From: ${startTime}\tTo: ${endTime}`;
+          const operatingHoursWithTime = `${this.formatDuration(session.operating_hours || 0)}\n${timeRange}`;
+          
           const sessionRow = worksheet.addRow([
             '',
             `  └ Session ${site.sessions.indexOf(session) + 1}`,
             new Date(session.session_start_time).toLocaleDateString(),
-            this.formatDuration(session.operating_hours || 0),
+            operatingHoursWithTime,
             `${(session.opening_percentage || 0).toFixed(0)}%`,
             `${(session.opening_fuel || 0).toFixed(1)}L`,
             `${(session.closing_percentage || 0).toFixed(0)}%`,
@@ -493,7 +498,11 @@ class EnergyRiteExcelReportGenerator {
             } else {
               cell.font = { italic: true, size: 9, color: { argb: 'FFEEEEEE' } };
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A4A4A' } };
-              cell.alignment = { horizontal: colNumber === 2 ? 'left' : 'center', vertical: 'middle' };
+              cell.alignment = { 
+                horizontal: colNumber === 2 ? 'left' : 'center', 
+                vertical: 'middle',
+                wrapText: colNumber === 4 // Enable text wrapping for operating hours column
+              };
             }
             cell.border = {
               left: { style: 'thin', color: { argb: 'FF666666' } },
@@ -501,7 +510,7 @@ class EnergyRiteExcelReportGenerator {
               bottom: { style: 'hair', color: { argb: 'FF888888' } }
             };
           });
-          sessionRow.height = 22;
+          sessionRow.height = 35; // Increased height to accommodate two lines
         }
       }
     }
