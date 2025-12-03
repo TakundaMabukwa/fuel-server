@@ -578,21 +578,17 @@ class EnergyRiteExcelReportGenerator {
    * Format duration from decimal hours to readable format
    */
   formatDuration(decimalHours) {
-    if (!decimalHours || decimalHours === 0) return '0 minutes';
+    if (!decimalHours || decimalHours === 0) return '0 hours 0 minutes 0 seconds';
     
     const hoursNum = parseFloat(decimalHours);
-    if (isNaN(hoursNum) || hoursNum === 0) return '0 minutes';
+    if (isNaN(hoursNum) || hoursNum === 0) return '0 hours 0 minutes 0 seconds';
     
     const hours = Math.floor(hoursNum);
-    const minutes = Math.round((hoursNum - hours) * 60);
+    const remainingMinutes = (hoursNum - hours) * 60;
+    const minutes = Math.floor(remainingMinutes);
+    const seconds = Math.round((remainingMinutes - minutes) * 60);
     
-    if (hours === 0) {
-      return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
-    } else if (minutes === 0) {
-      return `${hours} hour${hours !== 1 ? 's' : ''}`;
-    } else {
-      return `${hours} hour${hours !== 1 ? 's' : ''} ${minutes} minute${minutes !== 1 ? 's' : ''}`;
-    }
+    return `${hours} hours ${minutes} minutes ${seconds} seconds`;
   }
   
   /**
