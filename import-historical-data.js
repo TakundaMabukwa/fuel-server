@@ -56,12 +56,34 @@ async function processExcelFile(filePath, fileName) {
     console.log(`📊 Found ${data.length} rows of data`);
     
     let importedCount = 0;
+    let currentBranch = '';
+    let runningTimes = [];
     
-    for (const row of data) {
-      const sessionData = parseRowData(row, fileName);
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const site = row['FUEL REPORT SUMMARY'];
+      
+      // Track current branch
+      if (site && site.includes('Total Running Hours')) {
+        currentBranch = site.split(' Total Running Hours')[0].trim();
+        runningTimes = [];
+        continue;
+      }
+      
+      // Capture running times
+      if (site && site.includes('Running Time From:')) {
+        const match = site.match(/From: (\d{2}:\d{2}:\d{2}) To: (\d{2}:\d{2}:\d{2})/);
+        if (match) {
+          runningTimes.push({ start: match[1], end: match[2] });
+        }
+        continue;
+      }
+      
+      const sessionData = parseRowData(row, fileName, runningTimes);
       if (sessionData) {
         await insertHistoricalSession(sessionData);
         importedCount++;
+        runningTimes = []; // Clear after use
       }
     }
     
@@ -81,7 +103,7 @@ function getCostCodeFromFilename(fileName) {
   return null;
 }
 
-function parseRowData(row, fileName) {
+function parseRowData(row, fileName, runningTimes = []) {
   const site = row['FUEL REPORT SUMMARY'];
   const date = row['__EMPTY'];
   const operatingHours = row['__EMPTY_1'];
@@ -101,15 +123,26 @@ function parseRowData(row, fileName) {
   const sessionDate = parseExcelDate(date);
   if (!sessionDate) return null;
   
-  // Set realistic operating times (6 AM start)
-  const startTime = new Date(sessionDate);
-  startTime.setHours(6, 0, 0, 0);
-  const endTime = new Date(startTime.getTime() + (duration * 60 * 60 * 1000));
+  // Use actual running times if available, otherwise default to 6 AM start
+  let startTime = new Date(sessionDate);
+  let endTime = new Date(sessionDate);
   
-  // Ensure end time doesn't exceed 24 hours
-  if (endTime.getDate() !== startTime.getDate()) {
-    endTime.setHours(23, 59, 59, 999);
-    endTime.setDate(startTime.getDate());
+  if (runningTimes.length > 0 && duration > 0) {
+    const firstTime = runningTimes[0];
+    const [startHour, startMin, startSec] = firstTime.start.split(':').map(Number);
+    const [endHour, endMin, endSec] = firstTime.end.split(':').map(Number);
+    
+    startTime.setHours(startHour, startMin, startSec, 0);
+    endTime.setHours(endHour, endMin, endSec, 0);
+  } else {
+    startTime.setHours(6, 0, 0, 0);
+    endTime = new Date(startTime.getTime() + (duration * 60 * 60 * 1000));
+    
+    // Ensure end time doesn't exceed 24 hours
+    if (endTime.getDate() !== startTime.getDate()) {
+      endTime.setHours(23, 59, 59, 999);
+      endTime.setDate(startTime.getDate());
+    }
   }
   
   return {
@@ -150,35 +183,38 @@ function parseOperatingHours(hoursText) {
   
   let totalHours = 0;
   
-  // Match hours and minutes patterns - be more specific
-  const hourMatch = hoursText.match(/(\d+)\s*hours?/i);
-  const minuteMatch = hoursText.match(/(\d+)\s*minutes?/i);
-  
-  // If we have both hours and minutes
-  if (hourMatch && minuteMatch) {
-    totalHours = parseInt(hourMatch[1]) + parseInt(minuteMatch[1]) / 60;
+  // Match "Xh Ym" format (e.g., "24h 6m", "5h 11m")
+  const hhmm = hoursText.match(/(\d+)h\s*(\d+)m/i);
+  if (hhmm) {
+    totalHours = parseInt(hhmm[1]) + parseInt(hhmm[2]) / 60;
   }
-  // If we only have hours
-  else if (hourMatch && !minuteMatch) {
-    totalHours = parseInt(hourMatch[1]);
-  }
-  // If we only have minutes
-  else if (minuteMatch && !hourMatch) {
-    totalHours = parseInt(minuteMatch[1]) / 60;
-  }
-  // Handle formats like "2:30" (hours:minutes)
+  // Match "X hours Y minutes" format
   else {
-    const timeMatch = hoursText.match(/(\d+):(\d+)/);
-    if (timeMatch) {
-      totalHours = parseInt(timeMatch[1]) + parseInt(timeMatch[2]) / 60;
+    const hourMatch = hoursText.match(/(\d+)\s*hours?/i);
+    const minuteMatch = hoursText.match(/(\d+)\s*minutes?/i);
+    
+    if (hourMatch && minuteMatch) {
+      totalHours = parseInt(hourMatch[1]) + parseInt(minuteMatch[1]) / 60;
     }
-    // Handle pure numeric values
+    else if (hourMatch && !minuteMatch) {
+      totalHours = parseInt(hourMatch[1]);
+    }
+    else if (minuteMatch && !hourMatch) {
+      totalHours = parseInt(minuteMatch[1]) / 60;
+    }
+    // Handle "H:MM" format
     else {
-      const numeric = parseFloat(hoursText);
-      if (!isNaN(numeric) && numeric > 0) {
-        totalHours = numeric;
+      const timeMatch = hoursText.match(/(\d+):(\d+)/);
+      if (timeMatch) {
+        totalHours = parseInt(timeMatch[1]) + parseInt(timeMatch[2]) / 60;
       }
     }
+  }
+  
+  // Cap at 18 hours maximum (realistic daily limit)
+  if (totalHours > 18) {
+    console.log(`⚠️ Capping ${totalHours}h to 18h for realistic operation`);
+    totalHours = 18;
   }
   
   return totalHours > 0 ? Math.round(totalHours * 100) / 100 : null;

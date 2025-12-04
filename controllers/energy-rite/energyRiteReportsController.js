@@ -593,75 +593,33 @@ class EnergyRiteReportsController {
         total_cost: sessionsData.reduce((sum, s) => sum + parseFloat(s.cost_for_usage || 0), 0)
       };
       
-      // Group sessions by branch
-      const activitySummary = {};
-      sessionsData.forEach(session => {
-        if (!activitySummary[session.branch]) {
-          activitySummary[session.branch] = {
-            branch: session.branch,
-            company: session.company,
-            cost_code: session.cost_code,
-            sessions: [],
-            session_count: 0,
-            has_multiple_sessions: false,
-            expandable: false,
-            total_operating_hours: 0,
-            total_fuel_usage: 0,
-            total_fuel_filled: 0,
-            total_cost: 0,
-            first_session_start: null,
-            last_session_end: null,
-            peak_usage_session: null,
-            peak_usage_amount: 0
-          };
-        }
-        
-        const site = activitySummary[session.branch];
-        const sessionInfo = {
+      // Show each session individually (no grouping)
+      const activitySummary = sessionsData.map(session => {
+        return {
           id: session.id || `${session.branch}_${session.session_start_time}`,
+          branch: session.branch,
+          company: session.company,
+          cost_code: session.cost_code,
           start_time: session.session_start_time,
           end_time: session.session_end_time,
           duration_hours: parseFloat(session.operating_hours || 0),
           opening_fuel: parseFloat(session.opening_fuel || 0),
-          opening_percentage: parseFloat(session.opening_percentage || 0),
           closing_fuel: parseFloat(session.closing_fuel || 0),
-          closing_percentage: parseFloat(session.closing_percentage || 0),
           fuel_usage: parseFloat(session.total_usage || 0),
           fuel_filled: parseFloat(session.total_fill || 0),
           cost: parseFloat(session.cost_for_usage || 0),
           efficiency: parseFloat(session.liter_usage_per_hour || 0),
           status: session.session_status,
-          notes: session.notes
+          notes: session.notes,
+          // Individual session properties
+          session_count: 1,
+          has_multiple_sessions: false,
+          expandable: false,
+          total_operating_hours: parseFloat(session.operating_hours || 0),
+          total_fuel_usage: parseFloat(session.total_usage || 0),
+          total_fuel_filled: parseFloat(session.total_fill || 0),
+          total_cost: parseFloat(session.cost_for_usage || 0)
         };
-        
-        site.sessions.push(sessionInfo);
-        site.total_operating_hours += sessionInfo.duration_hours;
-        site.total_fuel_usage += sessionInfo.fuel_usage;
-        site.total_fuel_filled += sessionInfo.fuel_filled;
-        site.total_cost += sessionInfo.cost;
-        
-        // Track peak usage session
-        if (sessionInfo.fuel_usage > site.peak_usage_amount) {
-          site.peak_usage_amount = sessionInfo.fuel_usage;
-          site.peak_usage_session = sessionInfo.start_time;
-        }
-        
-        // Track first and last session times
-        if (!site.first_session_start || session.session_start_time < site.first_session_start) {
-          site.first_session_start = session.session_start_time;
-        }
-        if (!site.last_session_end || (session.session_end_time && session.session_end_time > site.last_session_end)) {
-          site.last_session_end = session.session_end_time;
-        }
-        
-        // Update session count
-        site.session_count = site.sessions.length;
-      });
-      
-      // Mark sites with multiple sessions as expandable
-      Object.values(activitySummary).forEach(site => {
-        site.has_multiple_sessions = site.session_count > 1;
-        site.expandable = site.has_multiple_sessions;
       });
       
       // Get fuel fills for the day with cost code filtering
@@ -973,10 +931,10 @@ class EnergyRiteReportsController {
       }
       
       // Merge fuel snapshots and fills with activity summary
-      Object.keys(fuelSnapshots).forEach(plate => {
-        if (activitySummary[plate]) {
-          activitySummary[plate].fuel_snapshots = fuelSnapshots[plate];
-          activitySummary[plate].fuel_fills = fuelSnapshots[plate].fuel_fills;
+      activitySummary.forEach(session => {
+        if (fuelSnapshots[session.branch]) {
+          session.fuel_snapshots = fuelSnapshots[session.branch];
+          session.fuel_fills = fuelSnapshots[session.branch].fuel_fills;
         }
       });
       
@@ -999,9 +957,9 @@ class EnergyRiteReportsController {
             peak_usage_period: peakPeriod,
             peak_usage_site: peakSite,
             peak_usage_analysis: {
-              highest_usage_site: Object.values(activitySummary).sort((a, b) => b.total_fuel_usage - a.total_fuel_usage)[0] || null,
-              highest_fill_site: Object.values(activitySummary).sort((a, b) => b.total_fuel_filled - a.total_fuel_filled)[0] || null,
-              most_active_site: Object.values(activitySummary).sort((a, b) => b.total_operating_hours - a.total_operating_hours)[0] || null
+              highest_usage_session: activitySummary.sort((a, b) => b.total_fuel_usage - a.total_fuel_usage)[0] || null,
+              highest_fill_session: activitySummary.sort((a, b) => b.total_fuel_filled - a.total_fuel_filled)[0] || null,
+              longest_session: activitySummary.sort((a, b) => b.total_operating_hours - a.total_operating_hours)[0] || null
             },
             fuel_fills: {
               total_fill_events: summary.total_fuel_fills,
@@ -1026,7 +984,7 @@ class EnergyRiteReportsController {
             financial_breakdown: financialAnalysis
           },
           shift_fuel_tracking: await calculateShiftFuelUsage(targetDate, fuelData, cost_code, site_id),
-          sites: Object.values(activitySummary)
+          sessions: activitySummary
         }
       });
 
