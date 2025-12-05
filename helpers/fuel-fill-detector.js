@@ -7,13 +7,13 @@ const { supabase } = require('../supabase-client');
 
 const FUEL_FILL_CONFIG = {
     // Minimum fuel increase to consider as a fill (in liters)
-    MIN_FILL_AMOUNT: 0.1,
+    MIN_FILL_AMOUNT: 5.0,
     
     // Maximum time window for fill detection (in minutes)
-    MAX_TIME_WINDOW: 120,
+    MAX_TIME_WINDOW: 180,
     
     // Minimum percentage increase to consider
-    MIN_PERCENTAGE_INCREASE: 0.1
+    MIN_PERCENTAGE_INCREASE: 2.0
 };
 
 /**
@@ -21,13 +21,14 @@ const FUEL_FILL_CONFIG = {
  * @param {string} plate - Vehicle plate number
  * @param {number} currentFuelLevel - Current fuel level
  * @param {string} driverName - Driver name status
+ * @param {Object} fuelData - Complete fuel data from WebSocket message
  * @returns {Object} Fill detection result
  */
-async function detectFuelFill(plate, currentFuelLevel, driverName) {
+async function detectFuelFill(plate, currentFuelLevel, driverName, fuelData = {}) {
     try {
         // Parse and validate current fuel level
         const parsedCurrentFuel = parseFloat(currentFuelLevel);
-        if (!parsedCurrentFuel || parsedCurrentFuel <= 0 || isNaN(parsedCurrentFuel)) {
+        if (isNaN(parsedCurrentFuel) || parsedCurrentFuel < 0) {
             return { isFill: false, reason: 'Invalid fuel level' };
         }
 
@@ -36,8 +37,111 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
             driverName.toLowerCase().includes('possible fuel fill') ||
             driverName.toLowerCase().includes('fuel fill') ||
             driverName.toLowerCase().includes('refuel') ||
-            driverName.toLowerCase().includes('filling')
+            driverName.toLowerCase().includes('filling') ||
+            driverName.toLowerCase().includes('fill')
         );
+
+        // If driver status indicates fuel fill, handle session management
+        if (hasFillStatus) {
+            console.log(`🚨 FUEL FILL STATUS DETECTED: ${plate} - ${driverName}`);
+            
+            // Get current active session to update
+            const { data: activeSession } = await supabase
+                .from('energy_rite_operating_sessions')
+                .select('*')
+                .eq('branch', plate)
+                .eq('session_status', 'ONGOING')
+                .order('session_start_time', { ascending: false })
+                .limit(1)
+                .single();
+
+            let fuelBefore = 0;
+            let fillAmount = 50; // Default
+
+            if (activeSession) {
+                // Update session to mark fuel fill event
+                fuelBefore = activeSession.opening_fuel || 0;
+                fillAmount = Math.max(parsedCurrentFuel - fuelBefore, 0);
+
+                await supabase
+                    .from('energy_rite_operating_sessions')
+                    .update({
+                        fill_events: (activeSession.fill_events || 0) + 1,
+                        fill_amount_during_session: (activeSession.fill_amount_during_session || 0) + fillAmount,
+                        // Reset opening fuel to current level to prevent usage miscalculation
+                        opening_fuel: parsedCurrentFuel
+                    })
+                    .eq('id', activeSession.id);
+            }
+
+            // Get vehicle info
+            let vehicleInfo = null;
+            try {
+                const { data, error: vehicleError } = await supabase
+                    .from('energyrite_vehicle_lookup')
+                    .select('cost_code, company')
+                    .eq('plate', plate)
+                    .single();
+                
+                if (!vehicleError) {
+                    vehicleInfo = data;
+                }
+            } catch (vehicleError) {
+                console.log(`Vehicle lookup failed for ${plate}, using defaults`);
+            }
+
+            // Use the complete fuel data for session creation
+            const currentFuelData = fuelData;
+            
+            // Create fuel fill session with all available data
+            const fillSession = await supabase
+                .from('energy_rite_operating_sessions')
+                .insert({
+                    branch: plate,
+                    company: vehicleInfo?.company || 'KFC',
+                    cost_code: vehicleInfo?.cost_code || null,
+                    session_date: new Date().toISOString().split('T')[0],
+                    session_start_time: new Date().toISOString(),
+                    session_end_time: new Date().toISOString(),
+                    operating_hours: 0,
+                    opening_percentage: currentFuelData.fuel_probe_1_level_percentage || 0,
+                    opening_fuel: fuelBefore,
+                    opening_volume: currentFuelData.fuel_probe_1_volume_in_tank || 0,
+                    opening_temperature: currentFuelData.fuel_probe_1_temperature || 0,
+                    closing_percentage: currentFuelData.fuel_probe_1_level_percentage || 0,
+                    closing_fuel: parsedCurrentFuel,
+                    closing_volume: currentFuelData.fuel_probe_1_volume_in_tank || 0,
+                    closing_temperature: currentFuelData.fuel_probe_1_temperature || 0,
+                    total_fill: fillAmount,
+                    total_usage: 0,
+                    liter_usage_per_hour: 0,
+                    cost_per_liter: 20.00,
+                    cost_for_usage: fillAmount * 20.00,
+                    session_status: 'FUEL_FILL',
+                    notes: `Fuel fill detected via status: ${driverName}`,
+                    fill_events: 1,
+                    fill_amount_during_session: fillAmount
+                });
+
+            if (fillSession.error) {
+                console.error('Error creating fuel fill session:', fillSession.error.message);
+            } else {
+                console.log(`⛽ FUEL FILL SESSION CREATED: ${plate} - ${fillAmount}L`);
+            }
+
+            return {
+                isFill: true,
+                vehicle: { plate: plate },
+                fillDetails: {
+                    fuelBefore: fuelBefore,
+                    currentFuel: parsedCurrentFuel,
+                    fillAmount: fillAmount,
+                    detectionMethod: 'STATUS_INDICATOR',
+                    fillTime: new Date(),
+                    sessionUpdated: !!activeSession
+                }
+            };
+        }
 
         // Get recent fuel data for comparison (filter out null values)
         const { data: recentData, error } = await supabase
@@ -48,21 +152,33 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
             .order('created_at', { ascending: false })
             .limit(10);
 
-        if (error) throw new Error(`Database error: ${error.message}`);
+        if (error) {
+            console.error('Database error in fuel fill detection:', error.message);
+            return { isFill: false, reason: 'Database connection error' };
+        }
+
+        if (!recentData || !Array.isArray(recentData)) {
+            return { isFill: false, reason: 'No data available' };
+        }
 
         // Filter out entries with null or invalid fuel levels
         const validData = recentData.filter(entry => {
-            const fuel = parseFloat(entry.fuel_probe_1_level);
-            return fuel && fuel > 0 && !isNaN(fuel);
+            const fuel = parseFloat(entry?.fuel_probe_1_level);
+            return !isNaN(fuel) && fuel >= 0;
         });
 
-        if (validData.length < 2) {
+        if (validData.length < 1) {
             return { isFill: false, reason: 'Insufficient valid data for comparison' };
         }
 
         const current = validData[0];
-        const previous = validData[1];
+        const previous = validData.length > 1 ? validData[1] : null;
         const currentTime = new Date();
+        
+        if (!previous) {
+            return { isFill: false, reason: 'Need at least 2 data points for comparison' };
+        }
+        
         const previousTime = new Date(previous.created_at);
 
         // Calculate time difference
@@ -73,8 +189,8 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
             return { isFill: false, reason: 'Time gap too large' };
         }
 
-        const previousFuel = parseFloat(previous.fuel_probe_1_level);
-        const currentFuel = parseFloat(current.fuel_probe_1_level);
+        const previousFuel = parseFloat(previous?.fuel_probe_1_level || 0);
+        const currentFuel = parseFloat(current?.fuel_probe_1_level || parsedCurrentFuel);
         const fuelIncrease = currentFuel - previousFuel;
         const fuelIncreasePercentage = previousFuel > 0 ? (fuelIncrease / previousFuel) * 100 : 0;
 
@@ -87,17 +203,27 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
             positiveIncrease: fuelIncrease > 0
         };
 
-        // Detect any positive fuel increase OR status indication
-        const isFill = fillConditions.statusIndicatesFill || 
-                      (fillConditions.positiveIncrease && fillConditions.withinTimeWindow);
+        // Detect fuel increase (lowered threshold for better detection)
+        const isFill = fillConditions.positiveIncrease && 
+                      (fuelIncrease >= 5 || fuelIncreasePercentage >= 5) && 
+                      fillConditions.withinTimeWindow;
 
         if (isFill) {
             // Get cost code and company for this vehicle
-            const { data: vehicleInfo } = await supabase
-                .from('energyrite_vehicle_lookup')
-                .select('cost_code, company')
-                .eq('plate', plate)
-                .single();
+            let vehicleInfo = null;
+            try {
+                const { data, error: vehicleError } = await supabase
+                    .from('energyrite_vehicle_lookup')
+                    .select('cost_code, company')
+                    .eq('plate', plate)
+                    .single();
+                
+                if (!vehicleError) {
+                    vehicleInfo = data;
+                }
+            } catch (vehicleError) {
+                console.log(`Vehicle lookup failed for ${plate}, using defaults`);
+            }
 
             // Log fuel fill
             const fillRecord = await supabase
@@ -123,23 +249,28 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
                 });
 
             if (fillRecord.error) {
-                console.error('Error logging fuel fill:', fillRecord.error);
+                console.error('Error logging fuel fill:', fillRecord.error.message || fillRecord.error);
+                // Continue execution even if logging fails
             }
 
-            // Log activity
-            await supabase.from('energy_rite_activity_log').insert({
-                activity_type: 'FUEL_FILL',
-                description: `Fuel fill detected for ${plate}: +${fuelIncrease.toFixed(1)}L`,
-                branch: plate,
-                activity_data: {
-                    previous_fuel: previousFuel,
-                    current_fuel: currentFuel,
-                    fill_amount: fuelIncrease,
-                    fill_percentage: fuelIncreasePercentage.toFixed(2),
-                    detection_method: hasFillStatus ? 'STATUS_INDICATOR' : 'LEVEL_INCREASE',
-                    timestamp: currentTime.toISOString()
-                }
-            });
+            // Log activity (with error handling)
+            try {
+                await supabase.from('energy_rite_activity_log').insert({
+                    activity_type: 'FUEL_FILL',
+                    description: `Fuel fill detected for ${plate}: +${fuelIncrease.toFixed(1)}L`,
+                    branch: plate,
+                    activity_data: {
+                        previous_fuel: previousFuel,
+                        current_fuel: currentFuel,
+                        fill_amount: fuelIncrease,
+                        fill_percentage: fuelIncreasePercentage.toFixed(2),
+                        detection_method: hasFillStatus ? 'STATUS_INDICATOR' : 'LEVEL_INCREASE',
+                        timestamp: currentTime.toISOString()
+                    }
+                });
+            } catch (activityError) {
+                console.error('Error logging activity:', activityError.message);
+            }
 
             const fillInfo = {
                 isFill: true,
@@ -176,7 +307,7 @@ async function detectFuelFill(plate, currentFuelLevel, driverName) {
 
     } catch (error) {
         console.error('Error detecting fuel fill:', error.message);
-        return { isFill: false, reason: 'Detection error', error: error.message };
+        return { isFill: false, reason: 'Detection error' };
     }
 }
 

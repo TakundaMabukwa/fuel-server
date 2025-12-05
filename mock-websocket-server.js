@@ -12,14 +12,14 @@ const vehicles = [
 ];
 
 const testScenarios = [
-  { step: 5, vehicle: 'UNKNOWN1', action: 'ENGINE_ON' },     // Plate not in API, should fallback to Quality
-  { step: 15, vehicle: 'UNKNOWN1', action: 'ENGINE_OFF' },   // Should match to KEYWEST via 53.15.1.232
-  // { step: 20, vehicle: 'ALEX', action: 'FUEL_FILL_START' },
-  // { step: 30, vehicle: 'ALEX', action: 'FUEL_FILL_END' },
-  { step: 35, vehicle: 'UNKNOWN2', action: 'ENGINE_ON' },    // Plate not in API, should fallback to Quality
-  { step: 50, vehicle: 'UNKNOWN2', action: 'ENGINE_OFF' },   // Should match to DURBANVILL via 61.172.2.170
-  // { step: 55, vehicle: 'BERGBRON', action: 'FUEL_FILL_START' },
-  // { step: 60, vehicle: 'BERGBRON', action: 'FUEL_FILL_END' }
+  { step: 5, vehicle: 'UNKNOWN1', action: 'ENGINE_ON' },
+  { step: 10, vehicle: 'UNKNOWN1', action: 'FUEL_FILL_START' },
+  { step: 12, vehicle: 'UNKNOWN1', action: 'FUEL_FILL_END' },
+  { step: 20, vehicle: 'UNKNOWN1', action: 'ENGINE_OFF' },
+  { step: 25, vehicle: 'UNKNOWN2', action: 'ENGINE_ON' },
+  { step: 30, vehicle: 'UNKNOWN2', action: 'FUEL_FILL_START' },
+  { step: 32, vehicle: 'UNKNOWN2', action: 'FUEL_FILL_END' },
+  { step: 40, vehicle: 'UNKNOWN2', action: 'ENGINE_OFF' }
 ];
 
 console.log('🧪 Mock WebSocket Server started on ws://localhost:8005');
@@ -64,17 +64,17 @@ wss.on('connection', (ws) => {
             
           case 'FUEL_FILL_START':
             vehicle.fillStartTime = new Date().toISOString();
-            driverName = 'POSSIBLE FUEL FILL';
-            console.log(`⛽ ${vehicle.plate}: FUEL FILL START at ${new Date().toLocaleTimeString()} (${vehicle.fuel.toFixed(4)}L)`);
+            driverName = 'Possible Fuel Fill';
+            console.log(`⛽ ${vehicle.plate}: FUEL FILL DETECTED at ${new Date().toLocaleTimeString()} (${vehicle.fuel.toFixed(4)}L)`);
             break;
             
           case 'FUEL_FILL_END':
             const fillEndTime = new Date().toISOString();
             const fillDuration = vehicle.fillStartTime ? 
               ((new Date(fillEndTime) - new Date(vehicle.fillStartTime)) / 1000 / 60).toFixed(1) : 'Unknown';
-            driverName = '';
-            fuelChange = 18.7654 + Math.random() * 5.2341; // Precise fill amount
-            console.log(`⛽ ${vehicle.plate}: FUEL FILL END at ${new Date().toLocaleTimeString()} (Duration: ${fillDuration}min, Added: ${fuelChange.toFixed(4)}L)`);
+            driverName = 'Normal Operation';
+            fuelChange = 25.5 + Math.random() * 10; // Fill amount
+            console.log(`⛽ ${vehicle.plate}: FUEL FILL COMPLETE at ${new Date().toLocaleTimeString()} (Duration: ${fillDuration}min, Added: ${fuelChange.toFixed(4)}L)`);
             vehicle.fillStartTime = null;
             break;
         }
