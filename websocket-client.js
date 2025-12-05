@@ -75,9 +75,10 @@ class EnergyRiteWebSocketClient {
         await this.completeFuelFillSession(actualBranch, vehicleData);
       }
       
-      // Process engine status changes (separate from fuel fills)
-      const engineStatus = this.parseEngineStatus(vehicleData.DriverName);
+      // Detect engine status from speed and movement
+      const engineStatus = vehicleData.Speed > 0 ? 'ON' : null;
       if (engineStatus) {
+        console.log(`🟢 ENGINE DETECTED: ${actualBranch} - Speed: ${vehicleData.Speed}`);
         await this.handleSessionChange(actualBranch, engineStatus, vehicleData);
       }
 
@@ -87,35 +88,7 @@ class EnergyRiteWebSocketClient {
   }
 
   async resolveVehicleBranch(plate, quality) {
-    try {
-      // Get vehicles from external API
-      const response = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles');
-      const vehicles = response.data.data;
-      
-      // First try exact plate match
-      let vehicleInfo = vehicles.find(v => v.branch === plate);
-      
-      if (vehicleInfo) {
-        return vehicleInfo.branch;
-      }
-      
-      // If no plate match and we have quality (IP), try quality match
-      if (quality) {
-        vehicleInfo = vehicles.find(v => v.quality === quality);
-        
-        if (vehicleInfo) {
-          console.log(`🔍 Fallback: ${plate} (${quality}) → ${vehicleInfo.branch}`);
-          return vehicleInfo.branch;
-        }
-      }
-      
-      // If no match found, return original plate
-      return plate;
-    } catch (error) {
-      console.error(`❌ Error resolving vehicle branch: ${error.message}`);
-      // If lookup fails, return original plate
-      return plate;
-    }
+    return plate;
   }
 
   reconnect() {
@@ -157,7 +130,7 @@ class EnergyRiteWebSocketClient {
   async completeFuelFillSession(plate, vehicleData) {
     try {
       // Complete any ongoing fuel fill session
-      const { data: sessions } = await supabase
+      const { data: sessions, error: sessionError } = await supabase
         .from('energy_rite_operating_sessions')
         .select('*')
         .eq('branch', plate)
@@ -165,7 +138,7 @@ class EnergyRiteWebSocketClient {
         .order('session_start_time', { ascending: false })
         .limit(1);
         
-      if (sessions.length > 0) {
+      if (!sessionError && sessions && sessions.length > 0) {
         const session = sessions[0];
         const currentTime = new Date();
         const startTime = new Date(session.session_start_time);
@@ -225,12 +198,12 @@ class EnergyRiteWebSocketClient {
     
     const normalized = driverName.replace(/\s+/g, ' ').trim().toUpperCase();
     
-    // Only ENGINE ON/OFF for sessions
-    if (normalized.includes('ENGINE ON')) {
+    // Check for ENGINE and PTO status
+    if (normalized.includes('ENGINE ON') || normalized.includes('PTO ON')) {
       console.log(`🟢 ENGINE ON: ${driverName}`);
       return 'ON';
     }
-    if (normalized.includes('ENGINE OFF')) {
+    if (normalized.includes('ENGINE OFF') || normalized.includes('PTO OFF')) {
       console.log(`🔴 ENGINE OFF: ${driverName}`);
       return 'OFF';
     }
