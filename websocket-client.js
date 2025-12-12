@@ -58,28 +58,31 @@ class EnergyRiteWebSocketClient {
 
   async processVehicleUpdate(vehicleData) {
     try {
-      // Resolve actual branch name using fallback mechanism
-      const actualBranch = await this.resolveVehicleBranch(vehicleData.Plate, vehicleData.Quality);
+      const actualBranch = vehicleData.Plate;
       
-      // Store fuel data for detection (ensure we have data to compare)
-      if (vehicleData.fuel_probe_1_level && vehicleData.fuel_probe_1_level !== null) {
+      // Store fuel data if available
+      if (vehicleData.fuel_probe_1_level) {
         await this.storeFuelData({ ...vehicleData, actualBranch });
       }
       
-      // Process fuel fill status (like engine sessions)
-      const fuelFillStatus = this.parseFuelFillStatus(vehicleData.DriverName);
-      if (fuelFillStatus) {
-        await this.handleFuelFillSessionChange(actualBranch, fuelFillStatus, vehicleData);
-      } else {
-        // If no fuel fill status, complete any ongoing fuel fill session
-        await this.completeFuelFillSession(actualBranch, vehicleData);
+
+      
+      // Handle engine status FIRST (before fuel fill processing)
+      const engineStatus = this.parseEngineStatus(vehicleData.DriverName);
+      if (engineStatus) {
+        console.log(`🔧 Processing engine ${engineStatus} for ${actualBranch}`);
+        await this.handleSessionChange(actualBranch, engineStatus, vehicleData);
       }
       
-      // Detect engine status from speed and movement
-      const engineStatus = vehicleData.Speed > 0 ? 'ON' : null;
-      if (engineStatus) {
-        console.log(`🟢 ENGINE DETECTED: ${actualBranch} - Speed: ${vehicleData.Speed}`);
-        await this.handleSessionChange(actualBranch, engineStatus, vehicleData);
+      // Then handle fuel fill status
+      const hasFuelFillStatus = this.parseFuelFillStatus(vehicleData.DriverName);
+      
+      if (hasFuelFillStatus) {
+        // Start fuel fill session
+        await this.handleFuelFillSessionChange(actualBranch, 'START', vehicleData);
+      } else {
+        // Complete any ongoing fuel fill session
+        await this.completeFuelFillSession(actualBranch, vehicleData);
       }
 
     } catch (error) {
@@ -94,6 +97,42 @@ class EnergyRiteWebSocketClient {
       console.error(`❌ Error resolving vehicle branch: ${error.message}`);
       return plate || 'UNKNOWN';
     }
+  }
+
+  async getFuelDataFallback(plate, quality) {
+    try {
+      console.log(`🔍 External API lookup for ${plate} with quality ${quality}`);
+      const response = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles', {
+        timeout: 10000
+      });
+      
+      if (response.data?.success && response.data?.data) {
+        // First try matching by quality (ensure string comparison)
+        let vehicleInfo = response.data.data.find(v => String(v.quality) === String(quality));
+        console.log(`🔍 Quality match for '${quality}': ${vehicleInfo ? 'FOUND' : 'NOT FOUND'}`);
+        
+        // Fallback to branch matching
+        if (!vehicleInfo) {
+          vehicleInfo = response.data.data.find(v => String(v.branch) === String(plate));
+          console.log(`🔍 Branch match for '${plate}': ${vehicleInfo ? 'FOUND' : 'NOT FOUND'}`);
+        }
+        
+        if (vehicleInfo) {
+          console.log(`✅ External API fuel data for ${plate}: ${vehicleInfo.fuel_probe_1_level}L`);
+          return {
+            fuel_probe_1_level: vehicleInfo.fuel_probe_1_level,
+            fuel_probe_1_level_percentage: vehicleInfo.fuel_probe_1_level_percentage,
+            fuel_probe_1_volume_in_tank: vehicleInfo.fuel_probe_1_volume_in_tank,
+            fuel_probe_1_temperature: vehicleInfo.fuel_probe_1_temperature
+          };
+        } else {
+          console.log(`❌ No match found for ${plate} (quality: ${quality})`);
+        }
+      }
+    } catch (error) {
+      console.log(`⚠️ External API failed for ${plate}:`, error.message);
+    }
+    return { fuel_probe_1_level: null };
   }
 
   reconnect() {
@@ -143,16 +182,32 @@ class EnergyRiteWebSocketClient {
         .order('session_start_time', { ascending: false })
         .limit(1);
         
-      if (!sessionError && sessions && Array.isArray(sessions) && sessions.length > 0) {
+      if (!sessionError && sessions && sessions.length > 0) {
         const session = sessions[0];
         const currentTime = new Date();
         const startTime = new Date(session.session_start_time);
         const durationMs = currentTime.getTime() - startTime.getTime();
         const duration = durationMs / 1000;
         const startingFuel = session.opening_fuel || 0;
-        const currentFuel = parseFloat(vehicleData?.fuel_probe_1_level) || 0;
+        
+        // Get current fuel data - use WebSocket or external API fallback
+        let currentFuel = 0;
+        let currentPercentage = 0;
+        
+        if (vehicleData?.fuel_probe_1_level) {
+          // Use WebSocket data
+          currentFuel = parseFloat(vehicleData.fuel_probe_1_level);
+          currentPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
+        } else {
+          // Fallback to external API
+          console.log(`🔄 No fuel data in WebSocket for ${plate}, using external API`);
+          const fallbackData = await this.getFuelDataFallback(plate, vehicleData.Quality);
+          currentFuel = parseFloat(fallbackData.fuel_probe_1_level) || 0;
+          currentPercentage = parseFloat(fallbackData.fuel_probe_1_level_percentage) || 0;
+        }
+        
         const fillAmount = Math.max(0, currentFuel - startingFuel);
-        const currentPercentage = parseFloat(vehicleData?.fuel_probe_1_level_percentage) || 0;
+        console.log(`⛽ FUEL FILL COMPLETE: ${plate} - ${startingFuel}L → ${currentFuel}L = +${fillAmount.toFixed(1)}L`);
         
         await supabase.from('energy_rite_operating_sessions')
           .update({
@@ -178,7 +233,7 @@ class EnergyRiteWebSocketClient {
             .order('session_start_time', { ascending: false })
             .limit(1);
             
-          if (engineSessions && engineSessions.length > 0) {
+          if (engineSessions && Array.isArray(engineSessions) && engineSessions.length > 0) {
             const engineSession = engineSessions[0];
             await supabase
               .from('energy_rite_operating_sessions')
@@ -199,20 +254,24 @@ class EnergyRiteWebSocketClient {
   }
 
   parseEngineStatus(driverName) {
-    if (!driverName || driverName.trim() === '') return null;
+    if (!driverName || driverName.trim() === '') {
+      return null;
+    }
     
     const normalized = driverName.replace(/\s+/g, ' ').trim().toUpperCase();
+    console.log(`🔍 Checking engine status: "${driverName}" -> "${normalized}"`);
     
     // Check for ENGINE and PTO status
     if (normalized.includes('ENGINE ON') || normalized.includes('PTO ON')) {
-      console.log(`🟢 ENGINE ON: ${driverName}`);
+      console.log(`🟢 ENGINE ON DETECTED: ${driverName}`);
       return 'ON';
     }
     if (normalized.includes('ENGINE OFF') || normalized.includes('PTO OFF')) {
-      console.log(`🔴 ENGINE OFF: ${driverName}`);
+      console.log(`🔴 ENGINE OFF DETECTED: ${driverName}`);
       return 'OFF';
     }
     
+    console.log(`ℹ️ No engine status detected in: "${driverName}"`);
     return null;
   }
 
@@ -222,6 +281,7 @@ class EnergyRiteWebSocketClient {
     }
     
     const normalized = driverName.replace(/\s+/g, ' ').trim().toUpperCase();
+    console.log(`🔍 Checking fuel fill status: "${driverName}" -> "${normalized}"`);
     
     // Check for fuel fill patterns
     if (normalized.includes('POSSIBLE FUEL FILL') ||
@@ -232,6 +292,7 @@ class EnergyRiteWebSocketClient {
       return 'START';
     }
     
+    console.log(`ℹ️ No fuel fill status detected in: "${driverName}"`);
     return null;
   }
 
@@ -284,7 +345,7 @@ class EnergyRiteWebSocketClient {
           .eq('session_status', 'FUEL_FILL_ONGOING')
           .limit(1);
           
-        if (existing && Array.isArray(existing) && existing.length === 0) {
+        if (!existing || existing.length === 0) {
           const openingFuel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
           const openingPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
           
@@ -314,66 +375,24 @@ class EnergyRiteWebSocketClient {
     try {
       const currentTime = new Date();
       
-      // Get vehicle info and fuel data from external API (single call)
-      const getVehicleData = async () => {
-        try {
-          // Try external API first
-          try {
-            const response = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles', {
-              timeout: 3000
-            });
-            
-            if (response.data && response.data.success && response.data.data) {
-              const vehicleInfo = response.data.data.find(v => v.branch === plate);
-              
-              if (vehicleInfo) {
-                console.log(`🔄 Using external API data for ${plate}: ${vehicleInfo.fuel_probe_1_level || 0}L (${vehicleInfo.fuel_probe_1_level_percentage || 0}%)`);
-                return {
-                  fuel_probe_1_level: parseFloat(vehicleInfo.fuel_probe_1_level) || 0,
-                  fuel_probe_1_level_percentage: parseFloat(vehicleInfo.fuel_probe_1_level_percentage) || 0,
-                  fuel_probe_1_volume_in_tank: parseFloat(vehicleInfo.fuel_probe_1_volume_in_tank) || null,
-                  fuel_probe_1_temperature: parseFloat(vehicleInfo.fuel_probe_1_temperature) || null,
-                  company: vehicleInfo.company || 'KFC',
-                  cost_code: vehicleInfo.cost_code
-                };
-              }
-            }
-          } catch (apiError) {
-            console.log(`⚠️ External API unavailable for ${plate}, using database fallback`);
-          }
-          
-          // Fallback to database
-          const { data: recentFuel } = await supabase
-            .from('energy_rite_fuel_data')
-            .select('*')
-            .eq('plate', plate)
-            .order('created_at', { ascending: false })
-            .limit(1);
-            
-          if (recentFuel && recentFuel.length > 0) {
-            const fuel = recentFuel[0];
-            console.log(`🔄 Using database fuel data for ${plate}: ${fuel.fuel_probe_1_level || 0}L (${fuel.fuel_probe_1_level_percentage || 0}%)`);
-            return {
-              fuel_probe_1_level: fuel.fuel_probe_1_level || 0,
-              fuel_probe_1_level_percentage: fuel.fuel_probe_1_level_percentage || 0,
-              fuel_probe_1_volume_in_tank: null,
-              fuel_probe_1_temperature: null,
-              company: 'KFC',
-              cost_code: null
-            };
-          }
-        } catch (error) {
-          console.error(`❌ Error getting vehicle data for ${plate}:`, error.message);
+      // Get fuel data - WebSocket or external API fallback
+      const getFuelData = async () => {
+        if (wsMessage?.fuel_probe_1_level) {
+          return {
+            fuel_probe_1_level: parseFloat(wsMessage.fuel_probe_1_level),
+            fuel_probe_1_level_percentage: parseFloat(wsMessage.fuel_probe_1_level_percentage) || 0,
+            fuel_probe_1_volume_in_tank: parseFloat(wsMessage.fuel_probe_1_volume_in_tank) || 0,
+            fuel_probe_1_temperature: parseFloat(wsMessage.fuel_probe_1_temperature) || 0
+          };
         }
         
-        // Return defaults if all fails
+        // Use external API fallback
+        const fallbackData = await this.getFuelDataFallback(plate, wsMessage?.Quality);
         return {
-          fuel_probe_1_level: 0,
-          fuel_probe_1_level_percentage: 0,
-          fuel_probe_1_volume_in_tank: 0,
-          fuel_probe_1_temperature: 0,
-          company: 'KFC',
-          cost_code: null
+          fuel_probe_1_level: parseFloat(fallbackData.fuel_probe_1_level) || 0,
+          fuel_probe_1_level_percentage: parseFloat(fallbackData.fuel_probe_1_level_percentage) || 0,
+          fuel_probe_1_volume_in_tank: parseFloat(fallbackData.fuel_probe_1_volume_in_tank) || 0,
+          fuel_probe_1_temperature: parseFloat(fallbackData.fuel_probe_1_temperature) || 0
         };
       };
       
@@ -386,29 +405,31 @@ class EnergyRiteWebSocketClient {
           .eq('session_status', 'ONGOING')
           .limit(1);
           
-        if (existing && Array.isArray(existing) && existing.length === 0) {
-          const vehicle = await getVehicleData();
+        if (!existing || existing.length === 0) {
+          const fuelData = await getFuelData();
           
-          // Debug log the vehicle data
-          console.log(`🔍 Vehicle data for ${plate}:`, vehicle);
+          console.log(`🔧 Creating engine session for ${plate} with fuel data:`, fuelData);
           
-          const openingFuel = parseFloat(vehicle?.fuel_probe_1_level || 0);
-          const openingPercentage = parseFloat(vehicle?.fuel_probe_1_level_percentage || 0);
-          await supabase.from('energy_rite_operating_sessions').insert({
+          const { data, error } = await supabase.from('energy_rite_operating_sessions').insert({
             branch: plate,
-            company: vehicle?.company || 'KFC',
-            cost_code: vehicle?.cost_code,
+            company: 'KFC',
             session_date: currentTime.toISOString().split('T')[0],
             session_start_time: currentTime.toISOString(),
-            opening_fuel: openingFuel,
-            opening_percentage: openingPercentage,
-            opening_volume: parseFloat(vehicle?.fuel_probe_1_volume_in_tank || 0),
-            opening_temperature: parseFloat(vehicle?.fuel_probe_1_temperature || 0),
+            opening_fuel: fuelData.fuel_probe_1_level,
+            opening_percentage: fuelData.fuel_probe_1_level_percentage,
+            opening_volume: fuelData.fuel_probe_1_volume_in_tank,
+            opening_temperature: fuelData.fuel_probe_1_temperature,
             session_status: 'ONGOING',
-            notes: `Engine started. Opening: ${openingFuel}L (${openingPercentage}%)`
+            notes: `Engine started. Opening: ${fuelData.fuel_probe_1_level}L (${fuelData.fuel_probe_1_level_percentage}%)`
           });
           
-          console.log(`🟢 Engine ON: ${plate} - Opening: ${openingFuel}L (${openingPercentage}%)`);
+          if (error) {
+            console.error(`❌ Error creating engine session for ${plate}:`, error);
+          } else {
+            console.log(`✅ Engine session created for ${plate} - Opening: ${fuelData.fuel_probe_1_level}L`);
+          }
+        } else {
+          console.log(`ℹ️ Engine session already exists for ${plate}`);
         }
       } else if (engineStatus === 'OFF') {
         // Complete existing session
@@ -422,38 +443,33 @@ class EnergyRiteWebSocketClient {
           
         if (sessions && Array.isArray(sessions) && sessions.length > 0) {
           const session = sessions[0];
-          const vehicle = await getVehicleData();
+          const fuelData = await getFuelData();
           const startTime = new Date(session.session_start_time);
           const durationMs = currentTime.getTime() - startTime.getTime();
           const operatingHours = Math.max(0, durationMs / (1000 * 60 * 60));
           const startingFuel = session.opening_fuel || 0;
-          const currentFuel = parseFloat(vehicle?.fuel_probe_1_level || 0);
+          const currentFuel = fuelData.fuel_probe_1_level;
           const fuelConsumed = Math.max(0, startingFuel - currentFuel);
           const fuelCost = fuelConsumed * 20;
           const literUsagePerHour = operatingHours > 0 ? fuelConsumed / operatingHours : 0;
           
-          // Debug log the vehicle data for engine off
-          console.log(`🔍 Engine OFF - Vehicle data for ${plate}:`, vehicle);
-          
-          const closingPercentage = parseFloat(vehicle?.fuel_probe_1_level_percentage || 0);
-          
           await supabase.from('energy_rite_operating_sessions')
             .update({
               session_end_time: currentTime.toISOString(),
-              operating_hours: durationMs / (1000 * 60 * 60),
+              operating_hours: operatingHours,
               closing_fuel: currentFuel,
-              closing_percentage: closingPercentage,
-              closing_volume: parseFloat(vehicle?.fuel_probe_1_volume_in_tank || 0),
-              closing_temperature: parseFloat(vehicle?.fuel_probe_1_temperature || 0),
+              closing_percentage: fuelData.fuel_probe_1_level_percentage,
+              closing_volume: fuelData.fuel_probe_1_volume_in_tank,
+              closing_temperature: fuelData.fuel_probe_1_temperature,
               total_usage: fuelConsumed,
               liter_usage_per_hour: literUsagePerHour,
               cost_for_usage: fuelCost,
               session_status: 'COMPLETED',
-              notes: `Engine stopped. Duration: ${(durationMs / (1000 * 60 * 60)).toFixed(6)}h (${durationMs}ms), Opening: ${startingFuel}L, Closing: ${currentFuel}L, Used: ${fuelConsumed.toFixed(1)}L`
+              notes: `Engine stopped. Duration: ${operatingHours.toFixed(2)}h, Opening: ${startingFuel}L, Closing: ${currentFuel}L, Used: ${fuelConsumed.toFixed(1)}L`
             })
             .eq('id', session.id);
             
-          console.log(`🔴 Engine OFF: ${plate} - Duration: ${operatingHours.toFixed(2)}h, Opening: ${startingFuel}L, Closing: ${currentFuel}L, Used: ${fuelConsumed.toFixed(1)}L`);
+          console.log(`🔴 Engine OFF: ${plate} - Used: ${fuelConsumed.toFixed(1)}L in ${operatingHours.toFixed(2)}h`);
         }
       }
       

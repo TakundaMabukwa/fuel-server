@@ -18,7 +18,7 @@ class EnergyRiteExcelReportGenerator {
       const { startDate, endDate, periodName } = this.calculateDateRange(reportType, reportDate);
       
       // Get operating sessions data
-      const sessionsData = await this.getOperatingSessionsData(startDate, endDate, cost_code, site_id);
+      const sessionsData = await this.getOperatingSessionsData(startDate, endDate, cost_code, site_id, reportType);
       
       // Create Excel workbook
       const workbook = new ExcelJS.Workbook();
@@ -93,6 +93,7 @@ class EnergyRiteExcelReportGenerator {
         bucket_path: uploadData ? bucketPath : null,
         total_sites: sessionsData.sites.length,
         total_sessions: sessionsData.totalSessions,
+        total_fills: sessionsData.totalFills || 0,
         total_operating_hours: sessionsData.totalOperatingHours
       });
       
@@ -114,6 +115,7 @@ class EnergyRiteExcelReportGenerator {
         stats: {
           total_sites: sessionsData.sites.length,
           total_sessions: sessionsData.totalSessions,
+          total_fills: sessionsData.totalFills || 0,
           total_operating_hours: sessionsData.totalOperatingHours
         }
       };
@@ -137,7 +139,8 @@ class EnergyRiteExcelReportGenerator {
     switch (reportType) {
       case 'daily':
         startDate.setHours(0, 0, 0, 0);
-        periodName = endDate.toISOString().slice(0, 10);
+        // Use local date format to avoid timezone issues
+        periodName = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
         break;
         
       case 'weekly':
@@ -164,11 +167,11 @@ class EnergyRiteExcelReportGenerator {
   }
   
   /**
-   * Get operating sessions data from Supabase
+   * Get operating sessions and fuel fills data from Supabase
    */
-  async getOperatingSessionsData(startDate, endDate, cost_code = null, site_id = null) {
+  async getOperatingSessionsData(startDate, endDate, cost_code = null, site_id = null, reportType = 'daily') {
     try {
-      console.log(`📊 Getting operating sessions data for Excel report`);
+      console.log(`📊 Getting operating sessions and fuel fills data for Excel report`);
       
       // Get all sites for the cost code from vehicle lookup with hierarchical access
       let allSites = [];
@@ -217,22 +220,45 @@ class EnergyRiteExcelReportGenerator {
         console.log(`📊 Excel Report - Found ${allSites.length} total sites across all cost codes`);
       }
       
-      // Get completed operating sessions
-      let query = supabase
+      // Use proper date formatting to avoid timezone conversion issues
+      const dateString = reportType === 'daily' ? 
+        `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}` :
+        startDate.toISOString().split('T')[0];
+      
+      console.log(`📅 Using date string for query: ${dateString}`);
+      
+      // Get operating sessions (COMPLETED status)
+      let sessionsQuery = supabase
         .from('energy_rite_operating_sessions')
         .select('*')
         .eq('session_status', 'COMPLETED')
-        .gte('session_start_time', startDate.toISOString())
-        .lte('session_start_time', endDate.toISOString());
+        .eq('session_date', dateString);
+      
+      // Get fuel fills (FUEL_FILL_COMPLETED status)
+      let fillsQuery = supabase
+        .from('energy_rite_operating_sessions')
+        .select('*')
+        .eq('session_status', 'FUEL_FILL_COMPLETED')
+        .eq('session_date', dateString);
       
       // Filter by branch names if cost_code or site_id is provided
       if ((cost_code || site_id) && allSites.length > 0) {
-        query = query.in('branch', allSites);
+        sessionsQuery = sessionsQuery.in('branch', allSites);
+        fillsQuery = fillsQuery.in('branch', allSites);
       }
       
-      const { data: sessions, error } = await query.order('session_start_time', { ascending: false });
+      const [sessionsResult, fillsResult] = await Promise.all([
+        sessionsQuery.order('session_start_time', { ascending: false }),
+        fillsQuery.order('session_start_time', { ascending: false })
+      ]);
       
-      if (error) throw new Error(`Database error: ${error.message}`);
+      if (sessionsResult.error) throw new Error(`Sessions error: ${sessionsResult.error.message}`);
+      if (fillsResult.error) throw new Error(`Fills error: ${fillsResult.error.message}`);
+      
+      const sessions = sessionsResult.data;
+      const fills = fillsResult.data;
+      
+      console.log(`📊 Found ${sessions.length} operating sessions and ${fills.length} fuel fills`);
       
       // Initialize all sites with zero values
       const siteGroups = {};
@@ -244,6 +270,7 @@ class EnergyRiteExcelReportGenerator {
           company: 'KFC',
           cost_code: cost_code,
           sessions: [],
+          fills: [],
           total_sessions: 0,
           total_operating_hours: 0,
           total_fuel_usage: 0,
@@ -253,7 +280,7 @@ class EnergyRiteExcelReportGenerator {
         };
       });
       
-      // Add session data to existing sites
+      // Add operating session data
       sessions.forEach(session => {
         if (!siteGroups[session.branch]) {
           siteGroups[session.branch] = {
@@ -261,6 +288,7 @@ class EnergyRiteExcelReportGenerator {
             company: session.company || 'KFC',
             cost_code: cost_code || session.cost_code,
             sessions: [],
+            fills: [],
             total_sessions: 0,
             total_operating_hours: 0,
             total_fuel_usage: 0,
@@ -272,14 +300,41 @@ class EnergyRiteExcelReportGenerator {
         const site = siteGroups[session.branch];
         site.sessions.push({
           ...session,
+          type: 'session',
           opening_percentage: parseFloat(session.opening_percentage || 0),
           closing_percentage: parseFloat(session.closing_percentage || 0)
         });
         site.total_sessions += 1;
         site.total_operating_hours += parseFloat(session.operating_hours || 0);
         site.total_fuel_usage += parseFloat(session.total_usage || 0);
-        site.total_fuel_filled += parseFloat(session.total_fill || 0);
         site.total_cost += parseFloat(session.cost_for_usage || 0);
+      });
+      
+      // Add fuel fill data
+      fills.forEach(fill => {
+        if (!siteGroups[fill.branch]) {
+          siteGroups[fill.branch] = {
+            branch: fill.branch,
+            company: fill.company || 'KFC',
+            cost_code: cost_code || fill.cost_code,
+            sessions: [],
+            fills: [],
+            total_sessions: 0,
+            total_operating_hours: 0,
+            total_fuel_usage: 0,
+            total_fuel_filled: 0,
+            total_cost: 0
+          };
+        }
+        
+        const site = siteGroups[fill.branch];
+        site.fills.push({
+          ...fill,
+          type: 'fill',
+          opening_percentage: parseFloat(fill.opening_percentage || 0),
+          closing_percentage: parseFloat(fill.closing_percentage || 0)
+        });
+        site.total_fuel_filled += parseFloat(fill.total_fill || 0);
       });
       
       // Calculate averages
@@ -293,13 +348,15 @@ class EnergyRiteExcelReportGenerator {
       
       const sites = Object.values(siteGroups).sort((a, b) => a.branch.localeCompare(b.branch));
       const totalSessions = sessions.length;
+      const totalFills = fills.length;
       const totalOperatingHours = sites.reduce((sum, site) => sum + site.total_operating_hours, 0);
       
-      console.log(`📊 Retrieved ${sites.length} sites with ${totalSessions} completed sessions`);
+      console.log(`📊 Retrieved ${sites.length} sites with ${totalSessions} sessions and ${totalFills} fills`);
       
       return {
         sites,
         totalSessions,
+        totalFills,
         totalOperatingHours: totalOperatingHours.toFixed(2)
       };
       
@@ -397,7 +454,7 @@ class EnergyRiteExcelReportGenerator {
   }
   
   /**
-   * Add expandable report data with summary and detailed rows
+   * Add expandable report data with sessions and fills separated
    */
   async addExpandableReportData(worksheet, sessionsData, reportType) {
     // Header row
@@ -430,13 +487,14 @@ class EnergyRiteExcelReportGenerator {
     });
     headerRow.height = 32;
     
-    // Add data for each site with session breakdown
+    // Add data for each site with sessions and fills breakdown
     for (const site of sessionsData.sites) {
-      const hasMultipleSessions = site.sessions.length > 1;
+      const hasActivity = site.sessions.length > 0 || site.fills.length > 0;
+      const totalActivities = site.sessions.length + site.fills.length;
       
       // Main summary row
       const summaryRow = worksheet.addRow([
-        site.sessions.length > 0 ? '▼' : '',
+        hasActivity ? '▼' : '',
         site.branch,
         `${site.total_sessions} sessions`,
         this.formatDuration(site.total_operating_hours || 0),
@@ -455,8 +513,8 @@ class EnergyRiteExcelReportGenerator {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
         } else {
-          cell.font = { bold: site.sessions.length > 0, color: { argb: 'FFFFFFFF' }, size: 10 };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: site.sessions.length > 0 ? 'FF404040' : 'FF333333' } };
+          cell.font = { bold: hasActivity, color: { argb: 'FFFFFFFF' }, size: 10 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hasActivity ? 'FF404040' : 'FF333333' } };
           cell.alignment = { horizontal: colNumber === 2 ? 'left' : 'center', vertical: 'middle' };
         }
         cell.border = {
@@ -466,13 +524,13 @@ class EnergyRiteExcelReportGenerator {
           right: { style: 'thin', color: { argb: 'FF666666' } }
         };
       });
-      if (site.sessions.length > 0) summaryRow.height = 26;
+      if (hasActivity) summaryRow.height = 26;
       
-      // Add individual session rows for all sessions (single or multiple)
+      // Add individual session rows
       if (site.sessions.length > 0) {
         for (const session of site.sessions) {
           const startTime = new Date(session.session_start_time).toLocaleTimeString('en-GB', { hour12: false });
-          const endTime = new Date(session.session_end_time).toLocaleTimeString('en-GB', { hour12: false });
+          const endTime = session.session_end_time ? new Date(session.session_end_time).toLocaleTimeString('en-GB', { hour12: false }) : 'Ongoing';
           const timeRange = `From: ${startTime}\tTo: ${endTime}`;
           const operatingHoursWithTime = `${this.formatDuration(session.operating_hours || 0)}\n${timeRange}`;
           
@@ -491,17 +549,17 @@ class EnergyRiteExcelReportGenerator {
             `R${(session.cost_for_usage || 0).toFixed(2)}`
           ]);
           
-          // Style session row with subtle indentation effect
+          // Style session row (blue tint for sessions)
           sessionRow.eachCell((cell, colNumber) => {
             if (colNumber === 1) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
             } else {
               cell.font = { italic: true, size: 9, color: { argb: 'FFEEEEEE' } };
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A4A4A' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A4A6A' } }; // Blue tint
               cell.alignment = { 
                 horizontal: colNumber === 2 ? 'left' : 'center', 
                 vertical: 'middle',
-                wrapText: colNumber === 4 // Enable text wrapping for operating hours column
+                wrapText: colNumber === 4
               };
             }
             cell.border = {
@@ -510,7 +568,53 @@ class EnergyRiteExcelReportGenerator {
               bottom: { style: 'hair', color: { argb: 'FF888888' } }
             };
           });
-          sessionRow.height = 35; // Increased height to accommodate two lines
+          sessionRow.height = 35;
+        }
+      }
+      
+      // Add individual fuel fill rows
+      if (site.fills.length > 0) {
+        for (const fill of site.fills) {
+          const startTime = new Date(fill.session_start_time).toLocaleTimeString('en-GB', { hour12: false });
+          const endTime = fill.session_end_time ? new Date(fill.session_end_time).toLocaleTimeString('en-GB', { hour12: false }) : 'Ongoing';
+          const timeRange = `From: ${startTime}\tTo: ${endTime}`;
+          const fillDurationWithTime = `${this.formatDuration(fill.operating_hours || 0)}\n${timeRange}`;
+          
+          const fillRow = worksheet.addRow([
+            '',
+            `  └ Fill ${site.fills.indexOf(fill) + 1}`,
+            new Date(fill.session_start_time).toLocaleDateString(),
+            fillDurationWithTime,
+            `${(fill.opening_percentage || 0).toFixed(0)}%`,
+            `${(fill.opening_fuel || 0).toFixed(1)}L`,
+            `${(fill.closing_percentage || 0).toFixed(0)}%`,
+            `${(fill.closing_fuel || 0).toFixed(1)}L`,
+            '0.00L', // Fills don't consume fuel
+            `${(fill.total_fill || 0).toFixed(2)}L`,
+            'N/A', // No efficiency for fills
+            'R0.00' // No cost for fills
+          ]);
+          
+          // Style fill row (green tint for fills)
+          fillRow.eachCell((cell, colNumber) => {
+            if (colNumber === 1) {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
+            } else {
+              cell.font = { italic: true, size: 9, color: { argb: 'FFEEEEEE' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A6A4A' } }; // Green tint
+              cell.alignment = { 
+                horizontal: colNumber === 2 ? 'left' : 'center', 
+                vertical: 'middle',
+                wrapText: colNumber === 4
+              };
+            }
+            cell.border = {
+              left: { style: 'thin', color: { argb: 'FF666666' } },
+              right: { style: 'thin', color: { argb: 'FF666666' } },
+              bottom: { style: 'hair', color: { argb: 'FF888888' } }
+            };
+          });
+          fillRow.height = 35;
         }
       }
     }
@@ -558,6 +662,30 @@ class EnergyRiteExcelReportGenerator {
       '',
       `R${sessionsData.sites.reduce((sum, site) => sum + site.total_cost, 0).toFixed(2)}`
     ]);
+    
+    // Add breakdown summary
+    worksheet.addRow([]);
+    const breakdownRow = worksheet.addRow([
+      '',
+      'BREAKDOWN:',
+      `${sessionsData.totalSessions} operating sessions, ${sessionsData.totalFills || 0} fuel fills`,
+      '', '', '', '', '', '', '', '', ''
+    ]);
+    
+    // Style breakdown row
+    breakdownRow.eachCell((cell, colNumber) => {
+      if (colNumber <= 3) {
+        cell.font = { italic: true, size: 10, color: { argb: 'FF666666' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8F8F8' } };
+        cell.alignment = { horizontal: colNumber === 2 ? 'left' : 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+          left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+          bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+          right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
+        };
+      }
+    });
     
     // Style totals row with emphasis
     totalRow.eachCell((cell, colNumber) => {
