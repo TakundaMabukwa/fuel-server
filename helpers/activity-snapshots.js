@@ -68,19 +68,19 @@ class ActivitySnapshotManager {
       
       vehicles.forEach(vehicle => {
         const isActive = vehicle.drivername !== 'PTO OFF / ENGINE OFF';
-        const fuelLevel = parseFloat(vehicle.fuel_probe_1_level) || 0;
+        const fuelVolume = parseFloat(vehicle.fuel_probe_1_volume_in_tank) || 0;
         const fuelPercentage = parseFloat(vehicle.fuel_probe_1_level_percentage) || 0;
         const costCode = costCodeMap[vehicle.branch] || vehicle.cost_code || null;
         
         if (isActive) snapshot.active_vehicles++;
-        snapshot.total_fuel_level += fuelLevel;
+        snapshot.total_fuel_level += fuelVolume;
         
         snapshot.vehicles_data.push({
           branch: vehicle.branch,
           company: vehicle.company,
           cost_code: costCode,
           is_active: isActive,
-          fuel_level: fuelLevel,
+          fuel_level: fuelVolume,
           fuel_percentage: fuelPercentage,
           engine_status: vehicle.engine_status,
           last_activity: vehicle.last_activity_time

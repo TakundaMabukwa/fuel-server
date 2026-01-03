@@ -175,6 +175,7 @@ class EnergyRiteWebSocketClient {
         plate: vehicleData.actualBranch || vehicleData.Plate,
         fuel_probe_1_level: fuelLevel,
         fuel_probe_1_level_percentage: fuelPercentage,
+        fuel_probe_1_volume_in_tank: parseFloat(vehicleData.fuel_probe_1_volume_in_tank) || 0,
         created_at: timestamp
       });
       
@@ -206,15 +207,15 @@ class EnergyRiteWebSocketClient {
         let currentFuel = 0;
         let currentPercentage = 0;
         
-        if (vehicleData?.fuel_probe_1_level) {
+        if (vehicleData?.fuel_probe_1_volume_in_tank) {
           // Use WebSocket data
-          currentFuel = parseFloat(vehicleData.fuel_probe_1_level);
+          currentFuel = parseFloat(vehicleData.fuel_probe_1_volume_in_tank);
           currentPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
         } else {
           // Fallback to external API
           console.log(`🔄 No fuel data in WebSocket for ${plate}, using external API`);
           const fallbackData = await this.getFuelDataFallback(plate, vehicleData.Quality);
-          currentFuel = parseFloat(fallbackData.fuel_probe_1_level) || 0;
+          currentFuel = parseFloat(fallbackData.fuel_probe_1_volume_in_tank) || 0;
           currentPercentage = parseFloat(fallbackData.fuel_probe_1_level_percentage) || 0;
         }
         
@@ -358,7 +359,7 @@ class EnergyRiteWebSocketClient {
           .limit(1);
           
         if (!existing || existing.length === 0) {
-          const openingFuel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
+          const openingFuel = parseFloat(vehicleData.fuel_probe_1_volume_in_tank) || 0;
           const openingPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
           
           await supabase.from('energy_rite_operating_sessions').insert({
@@ -427,7 +428,7 @@ class EnergyRiteWebSocketClient {
             company: 'KFC',
             session_date: currentTime.split('T')[0],
             session_start_time: currentTime,
-            opening_fuel: fuelData.fuel_probe_1_level,
+            opening_fuel: fuelData.fuel_probe_1_volume_in_tank,
             opening_percentage: fuelData.fuel_probe_1_level_percentage,
             opening_volume: fuelData.fuel_probe_1_volume_in_tank,
             opening_temperature: fuelData.fuel_probe_1_temperature,
@@ -461,7 +462,7 @@ class EnergyRiteWebSocketClient {
           const durationMs = endTime.getTime() - startTime.getTime();
           const operatingHours = Math.max(0, durationMs / (1000 * 60 * 60));
           const startingFuel = session.opening_fuel || 0;
-          const currentFuel = fuelData.fuel_probe_1_level;
+          const currentFuel = fuelData.fuel_probe_1_volume_in_tank;
           const fuelConsumed = Math.max(0, startingFuel - currentFuel);
           const fuelCost = fuelConsumed * 20;
           const literUsagePerHour = operatingHours > 0 ? fuelConsumed / operatingHours : 0;
