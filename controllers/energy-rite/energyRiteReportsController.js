@@ -1,4 +1,5 @@
 const { supabase } = require('../../supabase-client');
+const { combineFuelFills } = require('../../helpers/fuel-fill-combiner');
 
 // Helper function to calculate fuel usage between periods
 async function calculatePeriodFuelUsage(targetDate, accessibleCostCodes = [], specificPeriod = null) {
@@ -622,19 +623,20 @@ class EnergyRiteReportsController {
         };
       });
       
-      // Get fuel fills for the day with cost code filtering
-      let fillsQuery = supabase
-        .from('energy_rite_fuel_fills')
+      // Get fuel fill SESSIONS (not events) for the day with cost code filtering
+      let fillSessionsQuery = supabase
+        .from('energy_rite_operating_sessions')
         .select('*')
-        .gte('fill_date', targetDate)
-        .lt('fill_date', new Date(Date.parse(targetDate) + 24 * 60 * 60 * 1000).toISOString());
+        .eq('session_date', targetDate)
+        .eq('session_status', 'FUEL_FILL_COMPLETED')
+        .order('session_start_time');
       
       // Apply cost code filtering if provided
       if (cost_code) {
         try {
           const costCenterAccess = require('../../helpers/cost-center-access');
           const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
-          fillsQuery = fillsQuery.in('cost_code', accessibleCostCodes);
+          fillSessionsQuery = fillSessionsQuery.in('cost_code', accessibleCostCodes);
         } catch (costError) {
           console.log('Cost center access error:', costError.message);
         }
@@ -642,31 +644,44 @@ class EnergyRiteReportsController {
       
       // Apply site filtering if provided
       if (site_id) {
-        fillsQuery = fillsQuery.eq('plate', site_id);
+        fillSessionsQuery = fillSessionsQuery.eq('branch', site_id);
       }
       
-      const { data: fuelFills, error: fillsError } = await fillsQuery;
+      const { data: fuelFillSessions, error: fillsError } = await fillSessionsQuery;
         
-      if (fillsError) console.log('No fuel fills found for date:', fillsError.message);
+      if (fillsError) console.log('No fuel fill sessions found for date:', fillsError.message);
       
-      // Group fills by vehicle
+      // Group fill sessions by vehicle and combine consecutive fills
       const fillsByVehicle = {};
-      if (fuelFills) {
-        fuelFills.forEach(fill => {
-          if (!fillsByVehicle[fill.plate]) {
-            fillsByVehicle[fill.plate] = {
-              fill_count: 0,
-              total_filled: 0,
-              fills: []
-            };
+      if (fuelFillSessions) {
+        // Group by vehicle first
+        const sessionsByVehicle = {};
+        fuelFillSessions.forEach(session => {
+          if (!sessionsByVehicle[session.branch]) {
+            sessionsByVehicle[session.branch] = [];
           }
-          fillsByVehicle[fill.plate].fill_count++;
-          fillsByVehicle[fill.plate].total_filled += parseFloat(fill.fill_amount || 0);
-          fillsByVehicle[fill.plate].fills.push({
-            time: fill.fill_date,
-            amount: fill.fill_amount,
-            method: fill.detection_method
-          });
+          sessionsByVehicle[session.branch].push(session);
+        });
+        
+        // Combine consecutive fills for each vehicle (within 1 hour)
+        Object.keys(sessionsByVehicle).forEach(vehicle => {
+          const combinedFills = combineFuelFills(sessionsByVehicle[vehicle], 1);
+          
+          fillsByVehicle[vehicle] = {
+            fill_count: combinedFills.length,
+            total_filled: combinedFills.reduce((sum, f) => sum + parseFloat(f.total_fill || 0), 0),
+            fills: combinedFills.map(fill => ({
+              time: fill.session_start_time,
+              end_time: fill.session_end_time,
+              duration: fill.duration_formatted,
+              opening_fuel: fill.opening_fuel,
+              closing_fuel: fill.closing_fuel,
+              amount: fill.total_fill,
+              is_combined: fill.is_combined,
+              combined_count: fill.fill_count,
+              method: 'SESSION_BASED'
+            }))
+          };
         });
       }
       
@@ -938,9 +953,9 @@ class EnergyRiteReportsController {
         }
       });
       
-      // Add fuel fill summary to main summary (use session data to avoid double counting)
-      summary.total_fuel_fills = fuelFills ? fuelFills.length : 0;
-      summary.total_fuel_filled_amount = sessionsData.reduce((sum, s) => sum + parseFloat(s.total_fill || 0), 0);
+      // Add fuel fill summary to main summary (use combined session data)
+      summary.total_fuel_fills = Object.values(fillsByVehicle).reduce((sum, v) => sum + v.fill_count, 0);
+      summary.total_fuel_filled_amount = Object.values(fillsByVehicle).reduce((sum, v) => sum + v.total_filled, 0);
       
       res.json({
         success: true,
