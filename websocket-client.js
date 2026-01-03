@@ -15,6 +15,16 @@ class EnergyRiteWebSocketClient {
     this.testMode = wsUrl === 'dummy';
   }
 
+  // Convert LocTime and add 2 hours
+  convertLocTime(locTime) {
+    if (!locTime) return new Date().toISOString();
+    
+    // Parse the LocTime and add 2 hours
+    const date = new Date(locTime.replace(' ', 'T') + 'Z');
+    date.setHours(date.getHours() + 2);
+    return date.toISOString();
+  }
+
   connect() {
     if (this.testMode) {
       console.log('🧪 Test mode - skipping WebSocket connection');
@@ -159,11 +169,13 @@ class EnergyRiteWebSocketClient {
       
       if (isNaN(fuelLevel) || fuelLevel <= 0) return;
       
+      const timestamp = this.convertLocTime(vehicleData.LocTime);
+      
       await supabase.from('energy_rite_fuel_data').insert({
         plate: vehicleData.actualBranch || vehicleData.Plate,
         fuel_probe_1_level: fuelLevel,
         fuel_probe_1_level_percentage: fuelPercentage,
-        created_at: new Date().toISOString()
+        created_at: timestamp
       });
       
     } catch (error) {
@@ -184,7 +196,7 @@ class EnergyRiteWebSocketClient {
         
       if (!sessionError && sessions && sessions.length > 0) {
         const session = sessions[0];
-        const currentTime = new Date();
+        const currentTime = vehicleData.LocTime ? new Date(vehicleData.LocTime) : new Date();
         const startTime = new Date(session.session_start_time);
         const durationMs = currentTime.getTime() - startTime.getTime();
         const duration = durationMs / 1000;
@@ -211,7 +223,7 @@ class EnergyRiteWebSocketClient {
         
         await supabase.from('energy_rite_operating_sessions')
           .update({
-            session_end_time: currentTime.toISOString(),
+            session_end_time: this.convertLocTime(vehicleData.LocTime),
             operating_hours: durationMs / (1000 * 60 * 60),
             closing_fuel: currentFuel,
             closing_percentage: currentPercentage,
@@ -334,7 +346,7 @@ class EnergyRiteWebSocketClient {
 
   async handleFuelFillSessionChange(plate, fuelFillStatus, vehicleData) {
     try {
-      const currentTime = new Date();
+      const currentTime = this.convertLocTime(vehicleData.LocTime);
       
       if (fuelFillStatus === 'START') {
         // Check if fuel fill session already exists
@@ -352,8 +364,8 @@ class EnergyRiteWebSocketClient {
           await supabase.from('energy_rite_operating_sessions').insert({
             branch: plate,
             company: 'KFC',
-            session_date: currentTime.toISOString().split('T')[0],
-            session_start_time: currentTime.toISOString(),
+            session_date: currentTime.split('T')[0],
+            session_start_time: currentTime,
             opening_fuel: openingFuel,
             opening_percentage: openingPercentage,
             session_status: 'FUEL_FILL_ONGOING',
@@ -373,7 +385,7 @@ class EnergyRiteWebSocketClient {
 
   async handleSessionChange(plate, engineStatus, wsMessage = null) {
     try {
-      const currentTime = new Date();
+      const currentTime = this.convertLocTime(wsMessage?.LocTime);
       
       // Get fuel data - WebSocket or external API fallback
       const getFuelData = async () => {
@@ -413,8 +425,8 @@ class EnergyRiteWebSocketClient {
           const { data, error } = await supabase.from('energy_rite_operating_sessions').insert({
             branch: plate,
             company: 'KFC',
-            session_date: currentTime.toISOString().split('T')[0],
-            session_start_time: currentTime.toISOString(),
+            session_date: currentTime.split('T')[0],
+            session_start_time: currentTime,
             opening_fuel: fuelData.fuel_probe_1_level,
             opening_percentage: fuelData.fuel_probe_1_level_percentage,
             opening_volume: fuelData.fuel_probe_1_volume_in_tank,
@@ -445,7 +457,8 @@ class EnergyRiteWebSocketClient {
           const session = sessions[0];
           const fuelData = await getFuelData();
           const startTime = new Date(session.session_start_time);
-          const durationMs = currentTime.getTime() - startTime.getTime();
+          const endTime = new Date(currentTime);
+          const durationMs = endTime.getTime() - startTime.getTime();
           const operatingHours = Math.max(0, durationMs / (1000 * 60 * 60));
           const startingFuel = session.opening_fuel || 0;
           const currentFuel = fuelData.fuel_probe_1_level;
@@ -455,7 +468,7 @@ class EnergyRiteWebSocketClient {
           
           await supabase.from('energy_rite_operating_sessions')
             .update({
-              session_end_time: currentTime.toISOString(),
+              session_end_time: currentTime,
               operating_hours: operatingHours,
               closing_fuel: currentFuel,
               closing_percentage: fuelData.fuel_probe_1_level_percentage,
@@ -473,11 +486,11 @@ class EnergyRiteWebSocketClient {
         }
       }
       
-      // Log activity - THIS WAS MISSING!
+      // Log activity
       await supabase.from('energy_rite_activity_log').insert({
         branch: plate,
         activity_type: engineStatus === 'ON' ? 'ENGINE_ON' : 'ENGINE_OFF',
-        activity_time: currentTime.toISOString(),
+        activity_time: currentTime,
         notes: `Engine ${engineStatus} detected`
       });
       
@@ -490,7 +503,7 @@ class EnergyRiteWebSocketClient {
 
   async handleFuelFillEvent(plate, vehicleData) {
     try {
-      const currentTime = new Date();
+      const currentTime = vehicleData.LocTime ? new Date(vehicleData.LocTime) : new Date();
       const preFillLevel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
       const preFillPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
       
@@ -520,7 +533,7 @@ class EnergyRiteWebSocketClient {
       const currentFuelLevel = parseFloat(vehicleData.fuel_probe_1_level) || 0;
       const currentFuelPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
       const fillAmount = Math.max(0, currentFuelLevel - tracking.preFillLevel);
-      const currentTime = new Date();
+      const currentTime = vehicleData.LocTime ? new Date(vehicleData.LocTime) : new Date();
       const fillDuration = (currentTime - tracking.fillStartTime) / 1000;
       
       console.log(`⛽ Fuel fill ended for ${plate}: +${fillAmount.toFixed(1)}L`);

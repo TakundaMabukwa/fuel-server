@@ -34,7 +34,7 @@ async function cleanupOrphanedSessions() {
             total_usage: estimatedUsage,
             cost_for_usage: estimatedUsage * 20,
             session_status: 'COMPLETED',
-            notes: `Auto-completed orphaned session - estimated data`
+            notes: `Auto-completed orphaned session - estimated data (cleanup)`
           })
           .eq('id', session.id);
           
