@@ -388,7 +388,7 @@ class EnergyRiteExcelReportGenerator {
       { width: 5 },   // A: Expand button column
       { width: 22 },  // B: Site
       { width: 14 },  // C: Date  
-      { width: 16 },  // D: Operating Hours
+      { width: 28 },  // D: Operating Hours (increased from 16)
       { width: 16 },  // E: Opening Percentage
       { width: 14 },  // F: Opening Fuel
       { width: 16 },  // G: Closing Percentage
@@ -688,16 +688,6 @@ class EnergyRiteExcelReportGenerator {
       state: 'normal',
       showOutlineSymbols: true
     }];
-    
-    // Auto-fit all columns
-    worksheet.columns.forEach(column => {
-      let maxLength = 0;
-      column.eachCell({ includeEmpty: true }, cell => {
-        const cellValue = cell.value ? cell.value.toString() : '';
-        maxLength = Math.max(maxLength, cellValue.length);
-      });
-      column.width = Math.max(maxLength + 2, 10);
-    });
     
     
     // Add totals summary
