@@ -112,19 +112,19 @@ class EnergyRiteWebSocketClient {
   async getFuelDataFallback(plate, quality) {
     try {
       console.log(`🔍 External API lookup for ${plate} with quality ${quality}`);
-      const response = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles', {
+      const response = await axios.get('http://209.38.217.58:8000/api/energyrite-sites', {
         timeout: 10000
       });
       
-      if (response.data?.success && response.data?.data) {
+      if (response.data && Array.isArray(response.data)) {
         // First try matching by quality (ensure string comparison)
-        let vehicleInfo = response.data.data.find(v => String(v.quality) === String(quality));
+        let vehicleInfo = response.data.find(v => String(v.Quality) === String(quality));
         console.log(`🔍 Quality match for '${quality}': ${vehicleInfo ? 'FOUND' : 'NOT FOUND'}`);
         
-        // Fallback to branch matching
+        // Fallback to plate matching
         if (!vehicleInfo) {
-          vehicleInfo = response.data.data.find(v => String(v.branch) === String(plate));
-          console.log(`🔍 Branch match for '${plate}': ${vehicleInfo ? 'FOUND' : 'NOT FOUND'}`);
+          vehicleInfo = response.data.find(v => String(v.Plate) === String(plate));
+          console.log(`🔍 Plate match for '${plate}': ${vehicleInfo ? 'FOUND' : 'NOT FOUND'}`);
         }
         
         if (vehicleInfo) {
