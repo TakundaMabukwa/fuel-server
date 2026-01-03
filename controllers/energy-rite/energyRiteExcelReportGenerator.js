@@ -689,6 +689,16 @@ class EnergyRiteExcelReportGenerator {
       showOutlineSymbols: true
     }];
     
+    // Auto-fit all columns
+    worksheet.columns.forEach(column => {
+      let maxLength = 0;
+      column.eachCell({ includeEmpty: true }, cell => {
+        const cellValue = cell.value ? cell.value.toString() : '';
+        maxLength = Math.max(maxLength, cellValue.length);
+      });
+      column.width = Math.max(maxLength + 2, 10);
+    });
+    
     
     // Add totals summary
     worksheet.addRow([]);
