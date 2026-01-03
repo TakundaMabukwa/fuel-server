@@ -663,9 +663,9 @@ class EnergyRiteReportsController {
           sessionsByVehicle[session.branch].push(session);
         });
         
-        // Combine consecutive fills for each vehicle (within 1 hour)
+        // Combine consecutive fills for each vehicle (within 2 hours)
         Object.keys(sessionsByVehicle).forEach(vehicle => {
-          const combinedFills = combineFuelFills(sessionsByVehicle[vehicle], 1);
+          const combinedFills = combineFuelFills(sessionsByVehicle[vehicle], 2);
           
           fillsByVehicle[vehicle] = {
             fill_count: combinedFills.length,

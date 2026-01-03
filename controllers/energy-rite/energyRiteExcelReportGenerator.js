@@ -1,5 +1,6 @@
 const ExcelJS = require('exceljs');
 const { supabase } = require('../../supabase-client');
+const { combineFuelFills } = require('../../helpers/fuel-fill-combiner');
 const path = require('path');
 const fs = require('fs');
 
@@ -310,13 +311,24 @@ class EnergyRiteExcelReportGenerator {
         site.total_cost += parseFloat(session.cost_for_usage || 0);
       });
       
-      // Add fuel fill data
+      // Add fuel fill data and combine consecutive fills
+      const fillsByVehicle = {};
       fills.forEach(fill => {
-        if (!siteGroups[fill.branch]) {
-          siteGroups[fill.branch] = {
-            branch: fill.branch,
-            company: fill.company || 'KFC',
-            cost_code: cost_code || fill.cost_code,
+        if (!fillsByVehicle[fill.branch]) {
+          fillsByVehicle[fill.branch] = [];
+        }
+        fillsByVehicle[fill.branch].push(fill);
+      });
+      
+      // Combine fills for each vehicle
+      Object.keys(fillsByVehicle).forEach(branch => {
+        const combinedFills = combineFuelFills(fillsByVehicle[branch], 2);
+        
+        if (!siteGroups[branch]) {
+          siteGroups[branch] = {
+            branch: branch,
+            company: 'KFC',
+            cost_code: cost_code,
             sessions: [],
             fills: [],
             total_sessions: 0,
@@ -327,14 +339,16 @@ class EnergyRiteExcelReportGenerator {
           };
         }
         
-        const site = siteGroups[fill.branch];
-        site.fills.push({
-          ...fill,
-          type: 'fill',
-          opening_percentage: parseFloat(fill.opening_percentage || 0),
-          closing_percentage: parseFloat(fill.closing_percentage || 0)
+        const site = siteGroups[branch];
+        combinedFills.forEach(fill => {
+          site.fills.push({
+            ...fill,
+            type: 'fill',
+            opening_percentage: parseFloat(fill.opening_percentage || 0),
+            closing_percentage: parseFloat(fill.closing_percentage || 0)
+          });
+          site.total_fuel_filled += parseFloat(fill.total_fill || 0);
         });
-        site.total_fuel_filled += parseFloat(fill.total_fill || 0);
       });
       
       // Calculate averages
@@ -572,27 +586,28 @@ class EnergyRiteExcelReportGenerator {
         }
       }
       
-      // Add individual fuel fill rows
+      // Add individual fuel fill rows (now combined)
       if (site.fills.length > 0) {
         for (const fill of site.fills) {
           const startTime = new Date(fill.session_start_time).toLocaleTimeString('en-GB', { hour12: false });
           const endTime = fill.session_end_time ? new Date(fill.session_end_time).toLocaleTimeString('en-GB', { hour12: false }) : 'Ongoing';
           const timeRange = `From: ${startTime}\tTo: ${endTime}`;
-          const fillDurationWithTime = `${this.formatDuration(fill.operating_hours || 0)}\n${timeRange}`;
+          const fillDurationWithTime = `${fill.duration_formatted || this.formatDuration(fill.operating_hours || 0)}\n${timeRange}`;
+          const fillLabel = fill.is_combined ? `  └ Fill ${site.fills.indexOf(fill) + 1} (${fill.fill_count} combined)` : `  └ Fill ${site.fills.indexOf(fill) + 1}`;
           
           const fillRow = worksheet.addRow([
             '',
-            `  └ Fill ${site.fills.indexOf(fill) + 1}`,
+            fillLabel,
             new Date(fill.session_start_time).toLocaleDateString(),
             fillDurationWithTime,
             `${(fill.opening_percentage || 0).toFixed(0)}%`,
             `${(fill.opening_fuel || 0).toFixed(1)}L`,
             `${(fill.closing_percentage || 0).toFixed(0)}%`,
             `${(fill.closing_fuel || 0).toFixed(1)}L`,
-            '0.00L', // Fills don't consume fuel
+            '0.00L',
             `${(fill.total_fill || 0).toFixed(2)}L`,
-            'N/A', // No efficiency for fills
-            'R0.00' // No cost for fills
+            'N/A',
+            'R0.00'
           ]);
           
           // Style fill row (green tint for fills)
