@@ -540,17 +540,22 @@ class EnergyRiteExcelReportGenerator {
       });
       if (hasActivity) summaryRow.height = 26;
       
-      // Add individual session rows
+      // Add individual session rows (sorted by start time)
       if (site.sessions.length > 0) {
-        for (const session of site.sessions) {
+        // Sort sessions by start time (earliest first)
+        const sortedSessions = [...site.sessions].sort((a, b) => 
+          new Date(a.session_start_time) - new Date(b.session_start_time)
+        );
+        
+        for (const session of sortedSessions) {
           const startTime = new Date(session.session_start_time).toLocaleTimeString('en-GB', { hour12: false });
           const endTime = session.session_end_time ? new Date(session.session_end_time).toLocaleTimeString('en-GB', { hour12: false }) : 'Ongoing';
-          const timeRange = `From: ${startTime}\tTo: ${endTime}`;
+          const timeRange = `From: ${startTime}    To: ${endTime}`;
           const operatingHoursWithTime = `${this.formatDuration(session.operating_hours || 0)}\n${timeRange}`;
           
           const sessionRow = worksheet.addRow([
             '',
-            `  └ Session ${site.sessions.indexOf(session) + 1}`,
+            `  └ Session ${sortedSessions.indexOf(session) + 1}`,
             new Date(session.session_start_time).toLocaleDateString(),
             operatingHoursWithTime,
             `${(session.opening_percentage || 0).toFixed(0)}%`,
@@ -567,13 +572,21 @@ class EnergyRiteExcelReportGenerator {
           sessionRow.eachCell((cell, colNumber) => {
             if (colNumber === 1) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
+            } else if (colNumber === 4) {
+              // Time column - bold and italic
+              cell.font = { italic: true, bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A4A6A' } };
+              cell.alignment = { 
+                horizontal: 'center', 
+                vertical: 'middle',
+                wrapText: true
+              };
             } else {
-              cell.font = { italic: true, size: 9, color: { argb: 'FFEEEEEE' } };
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A4A6A' } }; // Blue tint
+              cell.font = { size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A4A6A' } };
               cell.alignment = { 
                 horizontal: colNumber === 2 ? 'left' : 'center', 
-                vertical: 'middle',
-                wrapText: colNumber === 4
+                vertical: 'middle'
               };
             }
             cell.border = {
@@ -586,14 +599,19 @@ class EnergyRiteExcelReportGenerator {
         }
       }
       
-      // Add individual fuel fill rows (now combined)
+      // Add individual fuel fill rows (now combined, sorted by start time)
       if (site.fills.length > 0) {
-        for (const fill of site.fills) {
+        // Sort fills by start time (earliest first)
+        const sortedFills = [...site.fills].sort((a, b) => 
+          new Date(a.session_start_time) - new Date(b.session_start_time)
+        );
+        
+        for (const fill of sortedFills) {
           const startTime = new Date(fill.session_start_time).toLocaleTimeString('en-GB', { hour12: false });
           const endTime = fill.session_end_time ? new Date(fill.session_end_time).toLocaleTimeString('en-GB', { hour12: false }) : 'Ongoing';
-          const timeRange = `From: ${startTime}\tTo: ${endTime}`;
+          const timeRange = `From: ${startTime}    To: ${endTime}`;
           const fillDurationWithTime = `${fill.duration_formatted || this.formatDuration(fill.operating_hours || 0)}\n${timeRange}`;
-          const fillLabel = fill.is_combined ? `  └ Fill ${site.fills.indexOf(fill) + 1} (${fill.fill_count} combined)` : `  └ Fill ${site.fills.indexOf(fill) + 1}`;
+          const fillLabel = fill.is_combined ? `  └ Fill ${sortedFills.indexOf(fill) + 1} (${fill.fill_count} combined)` : `  └ Fill ${sortedFills.indexOf(fill) + 1}`;
           
           const fillRow = worksheet.addRow([
             '',
@@ -614,13 +632,21 @@ class EnergyRiteExcelReportGenerator {
           fillRow.eachCell((cell, colNumber) => {
             if (colNumber === 1) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A1A1A' } };
+            } else if (colNumber === 4) {
+              // Time column - bold and italic
+              cell.font = { italic: true, bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A6A4A' } };
+              cell.alignment = { 
+                horizontal: 'center', 
+                vertical: 'middle',
+                wrapText: true
+              };
             } else {
-              cell.font = { italic: true, size: 9, color: { argb: 'FFEEEEEE' } };
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A6A4A' } }; // Green tint
+              cell.font = { size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4A6A4A' } };
               cell.alignment = { 
                 horizontal: colNumber === 2 ? 'left' : 'center', 
-                vertical: 'middle',
-                wrapText: colNumber === 4
+                vertical: 'middle'
               };
             }
             cell.border = {
