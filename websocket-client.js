@@ -197,7 +197,7 @@ class EnergyRiteWebSocketClient {
         
       if (!sessionError && sessions && sessions.length > 0) {
         const session = sessions[0];
-        const currentTime = vehicleData.LocTime ? new Date(vehicleData.LocTime) : new Date();
+        const currentTime = new Date(this.convertLocTime(vehicleData.LocTime));
         const startTime = new Date(session.session_start_time);
         const durationMs = currentTime.getTime() - startTime.getTime();
         const duration = durationMs / 1000;
