@@ -2108,14 +2108,17 @@ class EnergyRiteReportsController {
         .from('energy_rite_daily_snapshots')
         .select('*');
 
-      // Apply cost code filters
+      // Apply cost code filters using lookup table
       if (accessibleCostCodes.length > 0) {
-        if (accessibleCostCodes.length === 1) {
-          // Single cost code
-          query = query.eq('snapshot_data->>cost_code', accessibleCostCodes[0]);
-        } else {
-          // Multiple cost codes (hierarchy)
-          query = query.in('snapshot_data->>cost_code', accessibleCostCodes);
+        // Get vehicles with matching cost codes from lookup table
+        const { data: vehiclesWithCostCode } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate')
+          .in('cost_code', accessibleCostCodes);
+        
+        if (vehiclesWithCostCode && vehiclesWithCostCode.length > 0) {
+          const vehiclePlates = vehiclesWithCostCode.map(v => v.plate);
+          query = query.in('branch', vehiclePlates);
         }
       }
 
