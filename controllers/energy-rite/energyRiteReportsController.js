@@ -550,13 +550,23 @@ class EnergyRiteReportsController {
         .order('branch')
         .order('session_start_time');
       
-      // Apply filtering based on site_id or cost_code
+      // Apply filtering based on site_id or cost_code using lookup table
       if (site_id) {
         sessionsQuery = sessionsQuery.eq('branch', site_id);
       } else if (cost_code) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         const accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
-        sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
+        
+        // Get vehicles with matching cost codes from lookup table
+        const { data: vehiclesWithCostCode } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate')
+          .in('cost_code', accessibleCostCodes);
+        
+        if (vehiclesWithCostCode && vehiclesWithCostCode.length > 0) {
+          const vehiclePlates = vehiclesWithCostCode.map(v => v.plate);
+          sessionsQuery = sessionsQuery.in('branch', vehiclePlates);
+        }
       }
       
       const { data: sessionsData, error: sessionsError } = await sessionsQuery;
