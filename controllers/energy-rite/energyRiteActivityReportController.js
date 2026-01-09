@@ -102,9 +102,14 @@ class EnergyRiteActivityReportController {
           accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(costCode);
         }
         
+        console.log('Accessible cost codes:', accessibleCostCodes);
+        console.log('Total vehicles:', allVehicles?.length);
+        
         sitesToInclude = allVehicles
-          .filter(v => accessibleCostCodes.includes(v.cost_code))
+          .filter(v => v.cost_code && accessibleCostCodes.includes(v.cost_code))
           .map(v => v.plate);
+        
+        console.log('Sites to include after filtering:', sitesToInclude.length);
       }
       if (site) {
         sitesToInclude = sitesToInclude.filter(s => s === site);
@@ -176,28 +181,76 @@ class EnergyRiteActivityReportController {
         }
       });
 
-      // Get session data for additional metrics
-      let sessionQuery = supabase
-        .from('energy_rite_operating_sessions')
-        .select('*')
-        .gte('session_date', start)
-        .lte('session_date', end)
-        .eq('session_status', 'COMPLETED');
-
-      if (sitesToInclude.length > 0) {
-        sessionQuery = sessionQuery.in('branch', sitesToInclude);
+      // Get session data - filter by joining with lookup table for cost_code
+      let sessions = [];
+      
+      if (costCode || costCodes) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        let accessibleCostCodes = [];
+        
+        if (costCodes) {
+          const codeArray = costCodes.split(',').map(c => c.trim());
+          for (const code of codeArray) {
+            const accessible = await costCenterAccess.getAccessibleCostCenters(code);
+            accessibleCostCodes.push(...accessible);
+          }
+        } else if (costCode) {
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(costCode);
+        }
+        
+        // Get vehicles with matching cost codes
+        const vehiclesWithCostCode = allVehicles
+          .filter(v => v.cost_code && accessibleCostCodes.includes(v.cost_code))
+          .map(v => v.plate);
+        
+        if (vehiclesWithCostCode.length > 0) {
+          const { data } = await supabase
+            .from('energy_rite_operating_sessions')
+            .select('*')
+            .gte('session_date', start)
+            .lte('session_date', end)
+            .eq('session_status', 'COMPLETED')
+            .in('branch', vehiclesWithCostCode);
+          sessions = data || [];
+        }
+      } else {
+        const { data } = await supabase
+          .from('energy_rite_operating_sessions')
+          .select('*')
+          .gte('session_date', start)
+          .lte('session_date', end)
+          .eq('session_status', 'COMPLETED');
+        sessions = data || [];
+      }
+      
+      if (site) {
+        sessions = sessions.filter(s => s.branch === site);
       }
 
-      const { data: sessions } = await sessionQuery;
-
-      // Process sessions for additional metrics
+      // Process sessions for additional metrics - create site reports dynamically
       sessions?.forEach(session => {
         const siteName = session.branch;
-        if (siteReports[siteName]) {
-          siteReports[siteName].total_sessions++;
-          siteReports[siteName].total_operating_hours += parseFloat(session.operating_hours || 0);
-          siteReports[siteName].total_fuel_usage += parseFloat(session.total_usage || 0);
+        
+        // Create site report if it doesn't exist
+        if (!siteReports[siteName]) {
+          siteReports[siteName] = {
+            generator: siteName,
+            cost_code: costCodeMap[siteName] || session.cost_code,
+            company: 'KFC',
+            morning_fuel: 0,
+            afternoon_fuel: 0,
+            evening_fuel: 0,
+            peak_time_slot: null,
+            peak_fuel_usage: 0,
+            total_fuel_usage: 0,
+            total_sessions: 0,
+            total_operating_hours: 0
+          };
         }
+        
+        siteReports[siteName].total_sessions++;
+        siteReports[siteName].total_operating_hours += parseFloat(session.operating_hours || 0);
+        siteReports[siteName].total_fuel_usage += parseFloat(session.total_usage || 0);
       });
 
       // Calculate peak time slot and total fuel usage for each site
@@ -235,7 +288,11 @@ class EnergyRiteActivityReportController {
         .sort(([,a], [,b]) => b - a)[0] || ['morning_to_afternoon', 0];
 
       const reportData = Object.values(siteReports)
-        .filter(report => (report.morning_to_afternoon_usage || 0) > 0 || (report.afternoon_to_evening_usage || 0) > 0)
+        .filter(report => 
+          (report.morning_to_afternoon_usage || 0) > 0 || 
+          (report.afternoon_to_evening_usage || 0) > 0 ||
+          (report.total_sessions || 0) > 0
+        )
         .sort((a, b) => b.total_fuel_usage - a.total_fuel_usage);
 
       res.status(200).json({
