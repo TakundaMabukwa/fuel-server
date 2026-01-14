@@ -19,13 +19,29 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
     const lastDay = new Date(year, month, 0).getDate();
     const endDate = `${year}-${month.padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
 
+    console.log(`📅 Cumulative snapshots: ${startDate} to ${endDate}, Cost Code: ${cost_code || 'All'}`);
+
     // Get accessible cost codes if cost_code provided
     let accessibleCostCodes = [];
+    let vehiclePlatesForCostCode = [];
+    
     if (cost_code) {
       try {
         const costCenterAccess = require('../../helpers/cost-center-access');
         accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
+        console.log(`🔐 Accessible cost codes: ${accessibleCostCodes.join(', ')}`);
+        
+        // Get vehicle plates for these cost codes
+        const { data: vehicleLookup } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate, cost_code')
+          .in('cost_code', accessibleCostCodes);
+        
+        vehiclePlatesForCostCode = vehicleLookup?.map(v => v.plate) || [];
+        console.log(`🚗 Found ${vehiclePlatesForCostCode.length} vehicles for cost codes`);
+        
       } catch (error) {
+        console.log('⚠️ Cost center access error:', error.message);
         accessibleCostCodes = [cost_code];
       }
     }
@@ -43,26 +59,43 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
     if (error) throw error;
 
     if (!snapshots || snapshots.length === 0) {
+      console.log(`⚠️ No snapshots found for period ${startDate} to ${endDate}`);
       return res.json({
         success: true,
         data: {
           period: `${year}-${month}`,
+          cost_code: cost_code || 'All',
+          accessible_cost_codes: accessibleCostCodes.length > 0 ? accessibleCostCodes : null,
+          filtered_vehicles: vehiclePlatesForCostCode.length > 0 ? vehiclePlatesForCostCode.length : null,
           total_snapshots: 0,
           cumulative_metrics: {},
+          monthly_fuel_usage: {
+            morning_7_12: 0,
+            afternoon_12_17: 0,
+            evening_17_24: 0,
+            total_monthly: 0
+          },
           daily_summaries: []
-        }
+        },
+        message: 'No snapshot data found for this period'
       });
     }
 
-    // Filter snapshots by cost code if provided
+    console.log(`📸 Found ${snapshots.length} snapshots for period`);
+
+    // Filter snapshots by cost code if provided - filter at snapshot level for activity_snapshots
     let filteredSnapshots = snapshots;
-    if (accessibleCostCodes.length > 0) {
+    if (vehiclePlatesForCostCode.length > 0) {
       filteredSnapshots = snapshots.filter(snapshot => {
-        if (!snapshot.vehicles_data) return false;
+        if (!snapshot.vehicles_data || !Array.isArray(snapshot.vehicles_data)) return false;
+        
+        // Check if any vehicle in this snapshot matches our cost code plates
         return snapshot.vehicles_data.some(vehicle => 
-          accessibleCostCodes.includes(vehicle.cost_code)
+          vehiclePlatesForCostCode.includes(vehicle.branch || vehicle.plate)
         );
       });
+      
+      console.log(`✅ Filtered snapshots: ${filteredSnapshots.length} of ${snapshots.length} match cost code criteria`);
     }
 
     // Group by date and calculate cumulative metrics
@@ -74,11 +107,11 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
     filteredSnapshots.forEach(snapshot => {
       const date = snapshot.snapshot_date;
       
-      // Filter vehicles within snapshot by cost code
+      // Filter vehicles within snapshot by cost code plates
       let snapshotVehicles = snapshot.vehicles_data || [];
-      if (accessibleCostCodes.length > 0) {
+      if (vehiclePlatesForCostCode.length > 0) {
         snapshotVehicles = snapshotVehicles.filter(vehicle => 
-          accessibleCostCodes.includes(vehicle.cost_code)
+          vehiclePlatesForCostCode.includes(vehicle.branch || vehicle.plate)
         );
       }
       
@@ -123,16 +156,21 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
     
     let sessionsQuery = supabase
       .from('energy_rite_operating_sessions')
-      .select('total_usage, session_date, session_start_time')
+      .select('total_usage, session_date, session_start_time, cost_code, branch')
       .gte('session_date', startOfMonth)
       .lte('session_date', endOfMonth)
       .eq('session_status', 'COMPLETED');
     
+    // Filter by accessible cost codes OR vehicle plates
     if (accessibleCostCodes.length > 0) {
       sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
+    } else if (vehiclePlatesForCostCode.length > 0) {
+      sessionsQuery = sessionsQuery.in('branch', vehiclePlatesForCostCode);
     }
     
     const { data: sessions } = await sessionsQuery;
+    
+    console.log(`📊 Found ${sessions?.length || 0} completed sessions for the period`);
     
     // Group fuel usage by time periods
     const monthlyFuelUsage = {
@@ -149,6 +187,8 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
       else if (hour >= 12 && hour < 17) monthlyFuelUsage.afternoon += usage;
       else if (hour >= 17 && hour < 24) monthlyFuelUsage.evening += usage;
     });
+    
+    console.log(`⛽ Monthly fuel usage: Morning: ${monthlyFuelUsage.morning.toFixed(2)}L, Afternoon: ${monthlyFuelUsage.afternoon.toFixed(2)}L, Evening: ${monthlyFuelUsage.evening.toFixed(2)}L`);
 
     const totalDays = Object.keys(dailySummaries).length;
     const avgVehiclesPerDay = filteredSnapshots.length > 0 ? totalVehicleDays / filteredSnapshots.length : 0;
@@ -159,19 +199,20 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
         period: `${year}-${month}`,
         cost_code: cost_code || 'All',
         accessible_cost_codes: accessibleCostCodes.length > 0 ? accessibleCostCodes : null,
+        filtered_vehicles: vehiclePlatesForCostCode.length > 0 ? vehiclePlatesForCostCode.length : null,
         total_snapshots: filteredSnapshots.length,
         total_days_with_data: totalDays,
         cumulative_metrics: {
           total_active_vehicle_hours: cumulativeActiveHours,
           average_vehicles_per_day: Math.round(avgVehiclesPerDay),
-          average_utilization_rate: (cumulativeActiveHours / totalVehicleDays) * 100,
-          peak_single_day_active: Math.max(...Object.values(dailySummaries).map(d => d.peak_active_vehicles))
+          average_utilization_rate: totalVehicleDays > 0 ? ((cumulativeActiveHours / totalVehicleDays) * 100).toFixed(2) : 0,
+          peak_single_day_active: Math.max(...Object.values(dailySummaries).map(d => d.peak_active_vehicles), 0)
         },
         monthly_fuel_usage: {
-          morning_7_12: monthlyFuelUsage.morning.toFixed(2),
-          afternoon_12_17: monthlyFuelUsage.afternoon.toFixed(2),
-          evening_17_24: monthlyFuelUsage.evening.toFixed(2),
-          total_monthly: (monthlyFuelUsage.morning + monthlyFuelUsage.afternoon + monthlyFuelUsage.evening).toFixed(2)
+          morning_7_12: parseFloat(monthlyFuelUsage.morning.toFixed(2)),
+          afternoon_12_17: parseFloat(monthlyFuelUsage.afternoon.toFixed(2)),
+          evening_17_24: parseFloat(monthlyFuelUsage.evening.toFixed(2)),
+          total_monthly: parseFloat((monthlyFuelUsage.morning + monthlyFuelUsage.afternoon + monthlyFuelUsage.evening).toFixed(2))
         },
         daily_summaries: Object.values(dailySummaries).sort((a, b) => a.date.localeCompare(b.date))
       }

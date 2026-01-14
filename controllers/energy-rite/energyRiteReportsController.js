@@ -2073,7 +2073,9 @@ class EnergyRiteReportsController {
     try {
       const { 
         cost_code, 
-        date, 
+        date,
+        start_date,
+        end_date, 
         snapshot_type, 
         limit = 50, 
         offset = 0,
@@ -2081,7 +2083,7 @@ class EnergyRiteReportsController {
         calculate_fuel_usage = false // New parameter for fuel consumption calculations
       } = req.query;
 
-      console.log(`📸 Fetching snapshot data - Cost Code: ${cost_code || 'All'}, Date: ${date || 'Today'}, Type: ${snapshot_type || 'All'}, Hierarchy: ${include_hierarchy}, Fuel Usage: ${calculate_fuel_usage}`);
+      console.log(`📸 Fetching snapshot data - Cost Code: ${cost_code || 'All'}, Date: ${date || start_date || 'Today'}, End Date: ${end_date || 'Same'}, Type: ${snapshot_type || 'All'}, Hierarchy: ${include_hierarchy}, Fuel Usage: ${calculate_fuel_usage}`);
 
       // Handle cost center hierarchy if cost_code is provided
       let accessibleCostCodes = [];
@@ -2089,7 +2091,7 @@ class EnergyRiteReportsController {
         try {
           const costCenterAccess = require('../../helpers/cost-center-access');
           accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(cost_code);
-          console.log(`🔐 Hierarchical access: ${accessibleCostCodes.length} cost centers accessible`);
+          console.log(`🔐 Hierarchical access: ${accessibleCostCodes.length} cost centers accessible from ${cost_code}`);
         } catch (error) {
           console.log('⚠️ Cost center hierarchy access error:', error.message);
           // Fallback to exact match
@@ -2100,8 +2102,9 @@ class EnergyRiteReportsController {
         accessibleCostCodes = [cost_code];
       }
 
-      // Get target date
-      const targetDate = date || new Date().toISOString().split('T')[0];
+      // Get target date or date range
+      const targetStartDate = start_date || date || new Date().toISOString().split('T')[0];
+      const targetEndDate = end_date || targetStartDate;
 
       // Build query for snapshots
       let query = supabase
@@ -2116,14 +2119,58 @@ class EnergyRiteReportsController {
           .select('plate')
           .in('cost_code', accessibleCostCodes);
         
+        console.log(`🔍 Found ${vehiclesWithCostCode?.length || 0} vehicles matching cost codes: ${accessibleCostCodes.join(', ')}`);
+        
         if (vehiclesWithCostCode && vehiclesWithCostCode.length > 0) {
           const vehiclePlates = vehiclesWithCostCode.map(v => v.plate);
           query = query.in('branch', vehiclePlates);
+        } else {
+          // No vehicles found for this cost code - return empty result
+          console.log(`⚠️ No vehicles found for cost codes: ${accessibleCostCodes.join(', ')}`);
+          return res.status(200).json({
+            success: true,
+            data: {
+              snapshots: [],
+              fuel_usage_analysis: null,
+              pagination: { total_count: 0, limit: parseInt(limit), offset: parseInt(offset), has_more: false },
+              summary: {
+                total_snapshots: 0,
+                snapshots_with_cost_codes: 0,
+                cost_code_coverage_percentage: 0,
+                total_fuel_volume: '0.0',
+                average_fuel_level: '0.0'
+              },
+              hierarchy: {
+                requested_cost_code: cost_code,
+                accessible_cost_codes: accessibleCostCodes,
+                hierarchy_enabled: include_hierarchy !== 'false',
+                total_accessible_codes: accessibleCostCodes.length,
+                direct_matches: 0,
+                hierarchy_matches: 0
+              },
+              breakdowns: { by_cost_code: [], by_snapshot_type: {} },
+              filters_applied: {
+                cost_code: cost_code || null,
+                accessible_cost_codes: accessibleCostCodes,
+                start_date: targetStartDate,
+                end_date: targetEndDate,
+                snapshot_type: snapshot_type || null,
+                include_hierarchy: include_hierarchy !== 'false',
+                calculate_fuel_usage: calculate_fuel_usage === 'true'
+              }
+            },
+            timestamp: new Date().toISOString(),
+            message: 'No vehicles found for the specified cost code(s)'
+          });
         }
       }
 
-      // Apply date filter
-      query = query.eq('snapshot_date', targetDate);
+      // Apply date filter - support date range
+      if (targetStartDate === targetEndDate) {
+        query = query.eq('snapshot_date', targetStartDate);
+      } else {
+        query = query.gte('snapshot_date', targetStartDate).lte('snapshot_date', targetEndDate);
+      }
 
       // Apply snapshot type filter if specified
       if (snapshot_type) {
@@ -2145,7 +2192,7 @@ class EnergyRiteReportsController {
       let fuelUsageAnalysis = null;
       if (calculate_fuel_usage === 'true') {
         console.log('⛽ Calculating period fuel usage...');
-        fuelUsageAnalysis = await calculatePeriodFuelUsage(targetDate, accessibleCostCodes, snapshot_type);
+        fuelUsageAnalysis = await calculatePeriodFuelUsage(targetEndDate, accessibleCostCodes, snapshot_type);
       }
 
       // Process and enhance snapshot data
@@ -2251,7 +2298,8 @@ class EnergyRiteReportsController {
           filters_applied: {
             cost_code: cost_code || null,
             accessible_cost_codes: accessibleCostCodes.length > 0 ? accessibleCostCodes : null,
-            date: targetDate,
+            start_date: targetStartDate,
+            end_date: targetEndDate,
             snapshot_type: snapshot_type || null,
             include_hierarchy: include_hierarchy !== 'false',
             calculate_fuel_usage: calculate_fuel_usage === 'true'
