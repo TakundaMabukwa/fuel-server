@@ -592,47 +592,6 @@ class EnergyRiteReportsController {
         
       if (fuelError) throw new Error(`Fuel data error: ${fuelError.message}`);
       
-      // Calculate summary statistics
-      const summary = {
-        total_sites: new Set(sessionsData.map(s => s.branch)).size,
-        total_sessions: sessionsData.length,
-        completed_sessions: sessionsData.filter(s => s.session_status === 'COMPLETED').length,
-        ongoing_sessions: sessionsData.filter(s => s.session_status === 'ONGOING').length,
-        total_operating_hours: sessionsData.reduce((sum, s) => sum + parseFloat(s.operating_hours || 0), 0),
-        total_fuel_usage: sessionsData.reduce((sum, s) => sum + parseFloat(s.total_usage || 0), 0),
-        total_fuel_filled: sessionsData.reduce((sum, s) => sum + parseFloat(s.total_fill || 0), 0),
-        total_cost: sessionsData.reduce((sum, s) => sum + parseFloat(s.cost_for_usage || 0), 0)
-      };
-      
-      // Show each session individually (no grouping)
-      const activitySummary = sessionsData.map(session => {
-        return {
-          id: session.id || `${session.branch}_${session.session_start_time}`,
-          branch: session.branch,
-          company: session.company,
-          cost_code: session.cost_code,
-          start_time: session.session_start_time,
-          end_time: session.session_end_time,
-          duration_hours: parseFloat(session.operating_hours || 0),
-          opening_fuel: parseFloat(session.opening_fuel || 0),
-          closing_fuel: parseFloat(session.closing_fuel || 0),
-          fuel_usage: parseFloat(session.total_usage || 0),
-          fuel_filled: parseFloat(session.total_fill || 0),
-          cost: parseFloat(session.cost_for_usage || 0),
-          efficiency: parseFloat(session.liter_usage_per_hour || 0),
-          status: session.session_status,
-          notes: session.notes,
-          // Individual session properties
-          session_count: 1,
-          has_multiple_sessions: false,
-          expandable: false,
-          total_operating_hours: parseFloat(session.operating_hours || 0),
-          total_fuel_usage: parseFloat(session.total_usage || 0),
-          total_fuel_filled: parseFloat(session.total_fill || 0),
-          total_cost: parseFloat(session.cost_for_usage || 0)
-        };
-      });
-      
       // Get fuel fill SESSIONS (not events) for the day with cost code filtering
       let fillSessionsQuery = supabase
         .from('energy_rite_operating_sessions')
@@ -694,6 +653,90 @@ class EnergyRiteReportsController {
           };
         });
       }
+      
+      // Separate operating sessions from fuel fill sessions for activity summary
+      const operatingSessions = sessionsData.filter(s => s.session_status === 'COMPLETED' || s.session_status === 'ONGOING');
+      
+      // Build activity summary with operating sessions + combined fills
+      const activitySummary = [];
+      
+      // Add operating sessions
+      operatingSessions.forEach(session => {
+        activitySummary.push({
+          id: session.id || `${session.branch}_${session.session_start_time}`,
+          branch: session.branch,
+          company: session.company,
+          cost_code: session.cost_code,
+          start_time: session.session_start_time,
+          end_time: session.session_end_time,
+          duration_hours: parseFloat(session.operating_hours || 0),
+          opening_fuel: parseFloat(session.opening_fuel || 0),
+          closing_fuel: parseFloat(session.closing_fuel || 0),
+          fuel_usage: parseFloat(session.total_usage || 0),
+          fuel_filled: parseFloat(session.total_fill || 0),
+          cost: parseFloat(session.cost_for_usage || 0),
+          efficiency: parseFloat(session.liter_usage_per_hour || 0),
+          status: session.session_status,
+          notes: session.notes,
+          session_count: 1,
+          has_multiple_sessions: false,
+          expandable: false,
+          total_operating_hours: parseFloat(session.operating_hours || 0),
+          total_fuel_usage: parseFloat(session.total_usage || 0),
+          total_fuel_filled: parseFloat(session.total_fill || 0),
+          total_cost: parseFloat(session.cost_for_usage || 0)
+        });
+      });
+      
+      // Add combined fuel fills
+      Object.entries(fillsByVehicle).forEach(([vehicle, vehicleData]) => {
+        vehicleData.fills.forEach(fill => {
+          activitySummary.push({
+            id: `fill_${vehicle}_${fill.time}`,
+            branch: vehicle,
+            company: 'KFC',
+            cost_code: null,
+            start_time: fill.time,
+            end_time: fill.end_time,
+            duration_hours: parseFloat(fill.duration?.match(/(\d+) hours/)?.[1] || 0) + parseFloat(fill.duration?.match(/(\d+) minutes/)?.[1] || 0) / 60,
+            opening_fuel: parseFloat(fill.opening_fuel || 0),
+            closing_fuel: parseFloat(fill.closing_fuel || 0),
+            fuel_usage: 0,
+            fuel_filled: parseFloat(fill.amount || 0),
+            cost: 0,
+            efficiency: 0,
+            status: 'FUEL_FILL_COMPLETED',
+            notes: fill.is_combined ? `Combined ${fill.combined_count} fills. Total: ${fill.amount.toFixed(2)}L` : 'Fuel fill completed',
+            session_count: fill.is_combined ? fill.combined_count : 1,
+            has_multiple_sessions: fill.is_combined,
+            expandable: fill.is_combined,
+            is_combined: fill.is_combined,
+            combined_count: fill.combined_count,
+            total_operating_hours: 0,
+            total_fuel_usage: 0,
+            total_fuel_filled: parseFloat(fill.amount || 0),
+            total_cost: 0
+          });
+        });
+      });
+      
+      // Sort by branch then time
+      activitySummary.sort((a, b) => {
+        if (a.branch !== b.branch) return a.branch.localeCompare(b.branch);
+        return new Date(a.start_time) - new Date(b.start_time);
+      });
+      
+      // Calculate summary statistics (using original sessionsData for totals)
+      const summary = {
+        total_sites: new Set(sessionsData.map(s => s.branch)).size,
+        total_sessions: operatingSessions.length,
+        completed_sessions: operatingSessions.filter(s => s.session_status === 'COMPLETED').length,
+        ongoing_sessions: operatingSessions.filter(s => s.session_status === 'ONGOING').length,
+        total_operating_hours: operatingSessions.reduce((sum, s) => sum + parseFloat(s.operating_hours || 0), 0),
+        total_fuel_usage: operatingSessions.reduce((sum, s) => sum + parseFloat(s.total_usage || 0), 0),
+        total_fuel_filled: Object.values(fillsByVehicle).reduce((sum, v) => sum + v.total_filled, 0),
+        total_cost: operatingSessions.reduce((sum, s) => sum + parseFloat(s.cost_for_usage || 0), 0)
+      };
       
       // Add fuel level snapshots from fuel data
       const fuelSnapshots = {};
@@ -955,15 +998,14 @@ class EnergyRiteReportsController {
         });
       }
       
-      // Merge fuel snapshots and fills with activity summary
+      // Merge fuel snapshots with activity summary
       activitySummary.forEach(session => {
         if (fuelSnapshots[session.branch]) {
           session.fuel_snapshots = fuelSnapshots[session.branch];
-          session.fuel_fills = fuelSnapshots[session.branch].fuel_fills;
         }
       });
       
-      // Add fuel fill summary to main summary (use combined session data)
+      // Add fuel fill summary to main summary (already calculated above)
       summary.total_fuel_fills = Object.values(fillsByVehicle).reduce((sum, v) => sum + v.fill_count, 0);
       summary.total_fuel_filled_amount = Object.values(fillsByVehicle).reduce((sum, v) => sum + v.total_filled, 0);
       
