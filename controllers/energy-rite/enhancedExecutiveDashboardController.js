@@ -13,36 +13,54 @@ class EnhancedExecutiveDashboardController {
    */
   async getExecutiveDashboard(req, res) {
     try {
-      const { date, costCode, costCodes, period = 30 } = req.query;
+      const { 
+        date, 
+        start_date,
+        end_date,
+        costCode, 
+        cost_code, 
+        costCodes, 
+        cost_codes,
+        period = 30 
+      } = req.query;
+      
+      // Support both camelCase and snake_case parameter names
+      const finalCostCode = costCode || cost_code;
+      const finalCostCodes = costCodes || cost_codes;
+      const finalStartDate = start_date;
+      const finalEndDate = end_date;
       
       // Use provided date or today for end date
-      const targetDate = date || new Date().toISOString().split('T')[0];
+      const targetDate = finalEndDate || date || new Date().toISOString().split('T')[0];
       
       // Calculate cumulative period start date
       const endDate = new Date(targetDate);
-      const startDate = new Date(endDate.getTime() - parseInt(period) * 24 * 60 * 60 * 1000);
+      const startDate = finalStartDate ? new Date(finalStartDate) : new Date(endDate.getTime() - parseInt(period) * 24 * 60 * 60 * 1000);
       const startDateStr = startDate.toISOString().split('T')[0];
       
       console.log(`🎯 Executive Dashboard: ${startDateStr} to ${targetDate} (${period} days cumulative)`);
+      console.log(`🔍 Cost code filter: ${finalCostCode || finalCostCodes || 'None'}`);
       
       // Get current fleet status
       const vehicleResponse = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles');
       let vehicles = vehicleResponse.data.data || [];
       
       // Apply cost code filtering if provided
-      if (costCode || costCodes) {
+      if (finalCostCode || finalCostCodes) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         let accessibleCostCodes = [];
         
-        if (costCodes) {
-          const codeArray = costCodes.split(',').map(c => c.trim());
+        if (finalCostCodes) {
+          const codeArray = finalCostCodes.split(',').map(c => c.trim());
           for (const code of codeArray) {
             const accessible = await costCenterAccess.getAccessibleCostCenters(code);
             accessibleCostCodes.push(...accessible);
           }
-        } else if (costCode) {
-          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(costCode);
+        } else if (finalCostCode) {
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(finalCostCode);
         }
+        
+        console.log(`🔐 Accessible cost codes: ${accessibleCostCodes.join(', ')}`);
         
         const { data: vehicleLookup } = await supabase
           .from('energyrite_vehicle_lookup')
@@ -60,7 +78,7 @@ class EnhancedExecutiveDashboardController {
         });
       }
       
-      // Get operating sessions for the cumulative period
+      // Get operating sessions for the cumulative period - fetch all first
       let sessionsQuery = supabase
         .from('energy_rite_operating_sessions')
         .select(`
@@ -77,29 +95,54 @@ class EnhancedExecutiveDashboardController {
         .gte('session_date', startDateStr)
         .lte('session_date', targetDate)
         .eq('session_status', 'COMPLETED');
-        
-      // Apply cost code filtering to sessions
-      if (costCode || costCodes) {
+      
+      const { data: allSessions, error: sessionsError } = await sessionsQuery;
+      if (sessionsError) throw sessionsError;
+      
+      console.log(`📊 Found ${allSessions?.length || 0} total sessions`);
+      
+      // Apply cost code filtering in memory (filter by cost_code OR branch)
+      let sessions = allSessions || [];
+      if (finalCostCode || finalCostCodes) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         let accessibleCostCodes = [];
+        let vehiclePlatesForCostCode = [];
         
-        if (costCodes) {
-          const codeArray = costCodes.split(',').map(c => c.trim());
+        if (finalCostCodes) {
+          const codeArray = finalCostCodes.split(',').map(c => c.trim());
           for (const code of codeArray) {
             const accessible = await costCenterAccess.getAccessibleCostCenters(code);
             accessibleCostCodes.push(...accessible);
           }
-        } else if (costCode) {
-          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(costCode);
+        } else if (finalCostCode) {
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(finalCostCode);
         }
         
-        sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
+        // Get vehicle plates for these cost codes
+        const { data: vehicleLookup } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate, cost_code')
+          .in('cost_code', accessibleCostCodes);
+        
+        vehiclePlatesForCostCode = vehicleLookup?.map(v => v.plate) || [];
+        
+        console.log(`🔐 Accessible cost codes: ${accessibleCostCodes.join(', ')}`);
+        console.log(`🚗 Vehicle plates for filtering: ${vehiclePlatesForCostCode.length}`);
+        
+        // Filter sessions by EITHER cost_code OR branch/plate
+        const beforeFilter = sessions.length;
+        sessions = sessions.filter(session => {
+          const matchesCostCode = accessibleCostCodes.includes(session.cost_code);
+          const matchesPlate = vehiclePlatesForCostCode.includes(session.branch);
+          return matchesCostCode || matchesPlate;
+        });
+        
+        console.log(`🔍 Filtered sessions: ${beforeFilter} → ${sessions.length}`);
       }
       
-      const { data: sessions, error: sessionsError } = await sessionsQuery;
-      if (sessionsError) throw sessionsError;
+      console.log(`📊 Final session count: ${sessions?.length || 0}`);
       
-      // Get fuel fills for the cumulative period
+      // Get fuel fills for the cumulative period - fetch all first
       let fuelFillsQuery = supabase
         .from('energy_rite_fuel_fills')
         .select(`
@@ -115,27 +158,50 @@ class EnhancedExecutiveDashboardController {
         .gte('fill_date', `${startDateStr}T00:00:00.000Z`)
         .lte('fill_date', `${targetDate}T23:59:59.999Z`)
         .eq('status', 'detected');
-        
-      // Apply cost code filtering to fuel fills
-      if (costCode || costCodes) {
+      
+      const { data: allFuelFills, error: fillsError } = await fuelFillsQuery;
+      if (fillsError) throw fillsError;
+      
+      // Apply cost code filtering in memory
+      let fuelFills = allFuelFills || [];
+      if (finalCostCode || finalCostCodes) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         let accessibleCostCodes = [];
+        let vehiclePlatesForCostCode = [];
         
-        if (costCodes) {
-          const codeArray = costCodes.split(',').map(c => c.trim());
+        if (finalCostCodes) {
+          const codeArray = finalCostCodes.split(',').map(c => c.trim());
           for (const code of codeArray) {
             const accessible = await costCenterAccess.getAccessibleCostCenters(code);
             accessibleCostCodes.push(...accessible);
           }
-        } else if (costCode) {
-          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(costCode);
+        } else if (finalCostCode) {
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(finalCostCode);
         }
         
-        fuelFillsQuery = fuelFillsQuery.in('cost_code', accessibleCostCodes);
+        // Get vehicle plates for these cost codes
+        const { data: vehicleLookup } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate, cost_code')
+          .in('cost_code', accessibleCostCodes);
+        
+        vehiclePlatesForCostCode = vehicleLookup?.map(v => v.plate) || [];
+        
+        // Filter fuel fills by EITHER cost_code OR plate
+        const beforeFilter = fuelFills.length;
+        fuelFills = fuelFills.filter(fill => {
+          const matchesCostCode = accessibleCostCodes.includes(fill.cost_code);
+          const matchesPlate = vehiclePlatesForCostCode.includes(fill.plate);
+          return matchesCostCode || matchesPlate;
+        });
+        
+        console.log(`⛽ Filtered fuel fills: ${beforeFilter} → ${fuelFills.length}`);
       }
       
-      const { data: fuelFills, error: fillsError } = await fuelFillsQuery;
+      console.log(`⛽ Found ${fuelFills?.length || 0} fuel fills after filtering`);
       if (fillsError) throw fillsError;
+      
+      console.log(`⛽ Found ${fuelFills?.length || 0} fuel fills after filtering`);
       
       // Calculate cumulative operational metrics
       const totalLitresUsed = sessions.reduce((sum, s) => sum + (parseFloat(s.total_usage) || 0), 0);
@@ -151,7 +217,7 @@ class EnhancedExecutiveDashboardController {
       const sitesWithFills = [...new Set(fuelFills.map(f => f.plate))];
       
       // Detect continuous operations (sites running over 24 hours)
-      const continuousOperationsSites = await detectContinuousOperations(targetDate, costCode, costCodes);
+      const continuousOperationsSites = await detectContinuousOperations(targetDate, finalCostCode, finalCostCodes);
       
       // Site breakdown with cumulative metrics and fuel fills
       const siteMetrics = {};

@@ -32,13 +32,18 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
         console.log(`🔐 Accessible cost codes: ${accessibleCostCodes.join(', ')}`);
         
         // Get vehicle plates for these cost codes
-        const { data: vehicleLookup } = await supabase
+        const { data: vehicleLookup, error: lookupError } = await supabase
           .from('energyrite_vehicle_lookup')
           .select('plate, cost_code')
           .in('cost_code', accessibleCostCodes);
         
+        if (lookupError) {
+          console.error('❌ Error fetching vehicle lookup:', lookupError);
+        }
+        
         vehiclePlatesForCostCode = vehicleLookup?.map(v => v.plate) || [];
         console.log(`🚗 Found ${vehiclePlatesForCostCode.length} vehicles for cost codes`);
+        console.log(`🚗 Vehicle plates: ${vehiclePlatesForCostCode.join(', ')}`);
         
       } catch (error) {
         console.log('⚠️ Cost center access error:', error.message);
@@ -154,6 +159,9 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
     const startOfMonth = `${year}-${month.padStart(2, '0')}-01`;
     const endOfMonth = `${year}-${month.padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
     
+    console.log(`🔍 Querying sessions from ${startOfMonth} to ${endOfMonth}`);
+    
+    // Query all sessions for the period without cost code filter initially
     let sessionsQuery = supabase
       .from('energy_rite_operating_sessions')
       .select('total_usage, session_date, session_start_time, cost_code, branch')
@@ -161,16 +169,38 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
       .lte('session_date', endOfMonth)
       .eq('session_status', 'COMPLETED');
     
-    // Filter by accessible cost codes OR vehicle plates
-    if (accessibleCostCodes.length > 0) {
-      sessionsQuery = sessionsQuery.in('cost_code', accessibleCostCodes);
-    } else if (vehiclePlatesForCostCode.length > 0) {
-      sessionsQuery = sessionsQuery.in('branch', vehiclePlatesForCostCode);
+    const { data: allSessions, error: sessionsError } = await sessionsQuery;
+    
+    if (sessionsError) {
+      console.error('❌ Error fetching sessions:', sessionsError);
     }
     
-    const { data: sessions } = await sessionsQuery;
+    console.log(`📊 Found ${allSessions?.length || 0} total completed sessions for the period`);
     
-    console.log(`📊 Found ${sessions?.length || 0} completed sessions for the period`);
+    // Filter sessions based on cost code criteria
+    let filteredSessions = allSessions || [];
+    
+    if (cost_code && (accessibleCostCodes.length > 0 || vehiclePlatesForCostCode.length > 0)) {
+      const beforeFilter = filteredSessions.length;
+      
+      // Filter by EITHER cost_code match OR branch/plate match
+      filteredSessions = filteredSessions.filter(session => {
+        const matchesCostCode = accessibleCostCodes.includes(session.cost_code);
+        const matchesPlate = vehiclePlatesForCostCode.includes(session.branch);
+        return matchesCostCode || matchesPlate;
+      });
+      
+      console.log(`🔍 Filtered sessions: ${beforeFilter} → ${filteredSessions.length}`);
+      console.log(`   - By cost_code: ${filteredSessions.filter(s => accessibleCostCodes.includes(s.cost_code)).length}`);
+      console.log(`   - By branch/plate: ${filteredSessions.filter(s => vehiclePlatesForCostCode.includes(s.branch)).length}`);
+    }
+    
+    // Log sample session for debugging
+    if (filteredSessions.length > 0) {
+      console.log(`📋 Sample session:`, JSON.stringify(filteredSessions[0]));
+    } else if (allSessions && allSessions.length > 0) {
+      console.log(`📋 Sample of unfiltered session:`, JSON.stringify(allSessions[0]));
+    }
     
     // Group fuel usage by time periods
     const monthlyFuelUsage = {
@@ -179,13 +209,20 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
       evening: 0 // 17-24
     };
     
-    sessions?.forEach(session => {
+    filteredSessions?.forEach(session => {
       const hour = new Date(session.session_start_time).getHours();
       const usage = parseFloat(session.total_usage || 0);
       
-      if (hour >= 7 && hour < 12) monthlyFuelUsage.morning += usage;
-      else if (hour >= 12 && hour < 17) monthlyFuelUsage.afternoon += usage;
-      else if (hour >= 17 && hour < 24) monthlyFuelUsage.evening += usage;
+      if (hour >= 7 && hour < 12) {
+        monthlyFuelUsage.morning += usage;
+        console.log(`  ☀️ Morning session: ${usage}L at ${hour}:00`);
+      } else if (hour >= 12 && hour < 17) {
+        monthlyFuelUsage.afternoon += usage;
+        console.log(`  🌤️ Afternoon session: ${usage}L at ${hour}:00`);
+      } else if (hour >= 17 && hour < 24) {
+        monthlyFuelUsage.evening += usage;
+        console.log(`  🌙 Evening session: ${usage}L at ${hour}:00`);
+      }
     });
     
     console.log(`⛽ Monthly fuel usage: Morning: ${monthlyFuelUsage.morning.toFixed(2)}L, Afternoon: ${monthlyFuelUsage.afternoon.toFixed(2)}L, Evening: ${monthlyFuelUsage.evening.toFixed(2)}L`);
