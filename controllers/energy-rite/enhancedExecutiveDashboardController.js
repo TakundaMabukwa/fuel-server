@@ -1,4 +1,5 @@
 const { supabase } = require('../../supabase-client');
+const { combineFuelFills } = require('../../helpers/fuel-fill-combiner');
 const axios = require('axios');
 
 class EnhancedExecutiveDashboardController {
@@ -142,28 +143,21 @@ class EnhancedExecutiveDashboardController {
       
       console.log(`📊 Final session count: ${sessions?.length || 0}`);
       
-      // Get fuel fills for the cumulative period - fetch all first
-      let fuelFillsQuery = supabase
-        .from('energy_rite_fuel_fills')
-        .select(`
-          *,
-          fill_date,
-          plate,
-          cost_code,
-          fill_amount,
-          fuel_before,
-          fuel_after,
-          detection_method
-        `)
-        .gte('fill_date', `${startDateStr}T00:00:00.000Z`)
-        .lte('fill_date', `${targetDate}T23:59:59.999Z`)
-        .eq('status', 'detected');
+      // Get fuel fill SESSIONS (not events) for the cumulative period - fetch all first, then combine
+      let fuelFillSessionsQuery = supabase
+        .from('energy_rite_operating_sessions')
+        .select('*')
+        .gte('session_date', startDateStr)
+        .lte('session_date', targetDate)
+        .eq('session_status', 'FUEL_FILL_COMPLETED')
+        .order('branch')
+        .order('session_start_time');
       
-      const { data: allFuelFills, error: fillsError } = await fuelFillsQuery;
+      const { data: allFuelFillSessions, error: fillsError } = await fuelFillSessionsQuery;
       if (fillsError) throw fillsError;
       
       // Apply cost code filtering in memory
-      let fuelFills = allFuelFills || [];
+      let fuelFillSessions = allFuelFillSessions || [];
       if (finalCostCode || finalCostCodes) {
         const costCenterAccess = require('../../helpers/cost-center-access');
         let accessibleCostCodes = [];
@@ -187,25 +181,38 @@ class EnhancedExecutiveDashboardController {
         
         vehiclePlatesForCostCode = vehicleLookup?.map(v => v.plate) || [];
         
-        // Filter fuel fills by EITHER cost_code OR plate
-        const beforeFilter = fuelFills.length;
-        fuelFills = fuelFills.filter(fill => {
-          const matchesCostCode = accessibleCostCodes.includes(fill.cost_code);
-          const matchesPlate = vehiclePlatesForCostCode.includes(fill.plate);
+        // Filter fuel fill sessions by EITHER cost_code OR plate
+        const beforeFilter = fuelFillSessions.length;
+        fuelFillSessions = fuelFillSessions.filter(session => {
+          const matchesCostCode = accessibleCostCodes.includes(session.cost_code);
+          const matchesPlate = vehiclePlatesForCostCode.includes(session.branch);
           return matchesCostCode || matchesPlate;
         });
         
-        console.log(`⛽ Filtered fuel fills: ${beforeFilter} → ${fuelFills.length}`);
+        console.log(`⛽ Filtered fuel fill sessions: ${beforeFilter} → ${fuelFillSessions.length}`);
       }
       
-      console.log(`⛽ Found ${fuelFills?.length || 0} fuel fills after filtering`);
-      if (fillsError) throw fillsError;
+      // Group fill sessions by vehicle and combine consecutive fills (within 2 hours)
+      const sessionsByVehicle = {};
+      fuelFillSessions.forEach(session => {
+        if (!sessionsByVehicle[session.branch]) {
+          sessionsByVehicle[session.branch] = [];
+        }
+        sessionsByVehicle[session.branch].push(session);
+      });
       
-      console.log(`⛽ Found ${fuelFills?.length || 0} fuel fills after filtering`);
+      // Combine fills for each vehicle
+      const combinedFills = [];
+      Object.keys(sessionsByVehicle).forEach(vehicle => {
+        const combined = combineFuelFills(sessionsByVehicle[vehicle], 2);
+        combinedFills.push(...combined);
+      });
       
-      // Calculate cumulative operational metrics
+      console.log(`⛽ Found ${fuelFillSessions.length} fill sessions, combined into ${combinedFills.length} fills`);
+      
+      // Calculate cumulative operational metrics using combined fills
       const totalLitresUsed = sessions.reduce((sum, s) => sum + (parseFloat(s.total_usage) || 0), 0);
-      const totalLitresFilled = fuelFills.reduce((sum, f) => sum + (parseFloat(f.fill_amount) || 0), 0);
+      const totalLitresFilled = combinedFills.reduce((sum, f) => sum + (parseFloat(f.total_fill) || 0), 0);
       const totalOperationalHours = sessions.reduce((sum, s) => sum + (parseFloat(s.operating_hours) || 0), 0);
       const totalOperationalCost = sessions.reduce((sum, s) => sum + (parseFloat(s.cost_for_usage) || 0), 0);
       
@@ -213,8 +220,8 @@ class EnhancedExecutiveDashboardController {
       const sitesOperatedTotal = [...new Set(sessions.map(s => s.branch))];
       const totalSites = sitesOperatedTotal.length;
       
-      // Get sites with fuel fills
-      const sitesWithFills = [...new Set(fuelFills.map(f => f.plate))];
+      // Get sites with combined fuel fills
+      const sitesWithFills = [...new Set(combinedFills.map(f => f.branch))];
       
       // Detect continuous operations (sites running over 24 hours)
       const continuousOperationsSites = await detectContinuousOperations(targetDate, finalCostCode, finalCostCodes);
@@ -243,12 +250,14 @@ class EnhancedExecutiveDashboardController {
         siteMetrics[site].operational_cost += parseFloat(session.cost_for_usage || 0);
       });
       
-      // Add fuel fills data to site metrics
-      fuelFills.forEach(fill => {
-        const site = fill.plate;
+      // Add combined fuel fills data to site metrics
+      combinedFills.forEach(fill => {
+        const site = fill.branch;
+        const fillAmount = parseFloat(fill.total_fill || 0);
+        
         if (siteMetrics[site]) {
           siteMetrics[site].fuel_fills_count++;
-          siteMetrics[site].fuel_filled_liters += parseFloat(fill.fill_amount || 0);
+          siteMetrics[site].fuel_filled_liters += fillAmount;
         } else {
           // Site had fuel fills but no operational sessions in this period
           siteMetrics[site] = {
@@ -259,7 +268,7 @@ class EnhancedExecutiveDashboardController {
             fuel_usage_liters: 0,
             operational_cost: 0,
             fuel_fills_count: 1,
-            fuel_filled_liters: parseFloat(fill.fill_amount || 0),
+            fuel_filled_liters: fillAmount,
             is_continuous: false
           };
         }
@@ -303,8 +312,8 @@ class EnhancedExecutiveDashboardController {
         costCenterMetrics[costCode].sessions++;
       });
       
-      // Add fuel fills data to cost center metrics
-      fuelFills.forEach(fill => {
+      // Add combined fuel fills data to cost center metrics
+      combinedFills.forEach(fill => {
         const costCode = fill.cost_code || 'UNKNOWN';
         if (!costCenterMetrics[costCode]) {
           costCenterMetrics[costCode] = {
@@ -319,9 +328,9 @@ class EnhancedExecutiveDashboardController {
           };
         }
         
-        costCenterMetrics[costCode].sites.add(fill.plate);
+        costCenterMetrics[costCode].sites.add(fill.branch);
         costCenterMetrics[costCode].fuel_fills_count++;
-        costCenterMetrics[costCode].fuel_filled_liters += parseFloat(fill.fill_amount || 0);
+        costCenterMetrics[costCode].fuel_filled_liters += parseFloat(fill.total_fill || 0);
       });
       
       const costCenterSummary = Object.values(costCenterMetrics)
@@ -369,7 +378,7 @@ class EnhancedExecutiveDashboardController {
           continuous_operations_count: continuousOperationsSites.length,
           total_operational_cost: Math.round(totalOperationalCost * 100) / 100,
           sites_with_fuel_fills: sitesWithFills.length,
-          total_fuel_fill_events: fuelFills.length
+          total_fuel_fill_events: combinedFills.length
         },
         
         // Current fleet status
@@ -391,11 +400,11 @@ class EnhancedExecutiveDashboardController {
         // Fuel tracking analysis
         fuel_tracking: {
           fuel_fills_summary: {
-            total_fill_events: fuelFills.length,
+            total_fill_events: combinedFills.length,
             total_litres_filled: Math.round(totalLitresFilled * 100) / 100,
             sites_with_fills: sitesWithFills.length,
-            average_fill_amount: fuelFills.length > 0 ? 
-              Math.round((totalLitresFilled / fuelFills.length) * 100) / 100 : 0
+            average_fill_amount: combinedFills.length > 0 ? 
+              Math.round((totalLitresFilled / combinedFills.length) * 100) / 100 : 0
           },
           fuel_efficiency: {
             total_used: Math.round(totalLitresUsed * 100) / 100,
@@ -404,7 +413,7 @@ class EnhancedExecutiveDashboardController {
             usage_to_fill_ratio: totalLitresFilled > 0 ? 
               Math.round((totalLitresUsed / totalLitresFilled) * 100) / 100 : 0,
             fill_frequency: totalSites > 0 ? 
-              Math.round((fuelFills.length / totalSites) * 100) / 100 : 0
+              Math.round((combinedFills.length / totalSites) * 100) / 100 : 0
           }
         },
         
@@ -448,7 +457,7 @@ class EnhancedExecutiveDashboardController {
         executive_insights: [
           `${totalSites} sites operated over ${period} days with ${Math.round(totalOperationalHours)} total hours`,
           `${Math.round(totalLitresUsed)}L fuel consumed (cumulative over ${period} days)`,
-          `${Math.round(totalLitresFilled)}L fuel filled across ${fuelFills.length} fill events`,
+          `${Math.round(totalLitresFilled)}L fuel filled across ${combinedFills.length} fill events`,
           `Net consumption: ${Math.round(totalLitresUsed - totalLitresFilled)}L (used minus filled)`,
           `${continuousOperationsSites.length} sites running continuous operations (24+ hours)`,
           `Fleet utilization: ${Math.round(fleetUtilization)}% (${currentlyActive}/${totalFleetSize} active)`,
