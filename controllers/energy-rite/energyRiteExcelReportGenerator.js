@@ -9,14 +9,13 @@ class EnergyRiteExcelReportGenerator {
   /**
    * Generate comprehensive Excel report with expandable sections
    */
-  async generateExcelReport(reportType = 'daily', targetDate = null, cost_code = null, site_id = null, month_type = 'previous') {
+  async generateExcelReport(reportType = 'daily', targetDate = null, cost_code = null, site_id = null, month_type = 'previous', start_date = null, end_date = null) {
     try {
       console.log(`🔄 Generating ${reportType} Excel report...`);
       
-      // Default to today if no date provided
       const reportDate = targetDate ? new Date(targetDate) : new Date();
       console.log(`📅 Target date: ${reportDate.toISOString().split('T')[0]}`);
-      const { startDate, endDate, periodName } = this.calculateDateRange(reportType, reportDate, month_type);
+      const { startDate, endDate, periodName } = this.calculateDateRange(reportType, reportDate, month_type, start_date, end_date);
       
       // Get operating sessions data
       const sessionsData = await this.getOperatingSessionsData(startDate, endDate, cost_code, site_id, reportType);
@@ -130,7 +129,18 @@ class EnergyRiteExcelReportGenerator {
   /**
    * Calculate date range based on report type
    */
-  calculateDateRange(reportType, targetDate, month_type = 'previous') {
+  calculateDateRange(reportType, targetDate, month_type = 'previous', start_date = null, end_date = null) {
+    // If both start_date and end_date provided, use them directly
+    if (start_date && end_date) {
+      const startDate = new Date(start_date);
+      const endDate = new Date(end_date);
+      startDate.setHours(0, 0, 0, 0);
+      endDate.setHours(23, 59, 59, 999);
+      const periodName = `${start_date}_to_${end_date}`;
+      console.log(`📅 Using custom date range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
+      return { startDate, endDate, periodName };
+    }
+    
     const endDate = new Date(targetDate);
     let startDate = new Date(targetDate);
     let periodName = '';
@@ -152,10 +162,10 @@ class EnergyRiteExcelReportGenerator {
         
       case 'monthly':
         if (month_type === 'current') {
-          // Month-to-date: 1st of current month to today
+          // Month-to-date: 1st of target month to target date
           startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
           startDate.setHours(0, 0, 0, 0);
-          // endDate stays as today
+          // endDate already set to targetDate
           periodName = `${startDate.getFullYear()}-${(startDate.getMonth() + 1).toString().padStart(2, '0')}-MTD`;
         } else {
           // Previous month: 1st to last day of previous month

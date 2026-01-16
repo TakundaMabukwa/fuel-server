@@ -12,13 +12,14 @@ class EnergyRiteReportDocumentsController {
       const { 
         report_type = 'daily', 
         target_date = null,
-        date = null, // Accept 'date' parameter from frontend
+        date = null,
+        start_date = null,
+        end_date = null,
         cost_code = null,
         site_id = null,
-        month_type = 'previous' // 'previous' or 'current' for monthly reports
-      } = { ...req.body, ...req.query }; // Accept from both body and query params
+        month_type = 'previous'
+      } = { ...req.body, ...req.query };
       
-      // Use 'date' if provided, otherwise fall back to 'target_date'
       const reportDate = date || target_date;
       
       console.log(`📅 Request params: type=${report_type}, date=${reportDate}, cost_code=${cost_code}, site_id=${site_id}`);
@@ -37,7 +38,9 @@ class EnergyRiteReportDocumentsController {
         reportDate, 
         cost_code,
         site_id,
-        month_type
+        month_type,
+        start_date,
+        end_date
       );
       
       // Send email with the report
