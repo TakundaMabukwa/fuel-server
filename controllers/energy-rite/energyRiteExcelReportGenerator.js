@@ -9,14 +9,14 @@ class EnergyRiteExcelReportGenerator {
   /**
    * Generate comprehensive Excel report with expandable sections
    */
-  async generateExcelReport(reportType = 'daily', targetDate = null, cost_code = null, site_id = null) {
+  async generateExcelReport(reportType = 'daily', targetDate = null, cost_code = null, site_id = null, month_type = 'previous') {
     try {
       console.log(`🔄 Generating ${reportType} Excel report...`);
       
       // Default to today if no date provided
       const reportDate = targetDate ? new Date(targetDate) : new Date();
       console.log(`📅 Target date: ${reportDate.toISOString().split('T')[0]}`);
-      const { startDate, endDate, periodName } = this.calculateDateRange(reportType, reportDate);
+      const { startDate, endDate, periodName } = this.calculateDateRange(reportType, reportDate, month_type);
       
       // Get operating sessions data
       const sessionsData = await this.getOperatingSessionsData(startDate, endDate, cost_code, site_id, reportType);
@@ -130,7 +130,7 @@ class EnergyRiteExcelReportGenerator {
   /**
    * Calculate date range based on report type
    */
-  calculateDateRange(reportType, targetDate) {
+  calculateDateRange(reportType, targetDate, month_type = 'previous') {
     const endDate = new Date(targetDate);
     let startDate = new Date(targetDate);
     let periodName = '';
@@ -151,12 +151,22 @@ class EnergyRiteExcelReportGenerator {
         break;
         
       case 'monthly':
-        startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setMonth(endDate.getMonth() + 1);
-        endDate.setDate(0);
-        endDate.setHours(23, 59, 59, 999);
-        periodName = `${startDate.getFullYear()}-${(startDate.getMonth() + 1).toString().padStart(2, '0')}`;
+        if (month_type === 'current') {
+          // Month-to-date: 1st of current month to today
+          startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+          startDate.setHours(0, 0, 0, 0);
+          // endDate stays as today
+          periodName = `${startDate.getFullYear()}-${(startDate.getMonth() + 1).toString().padStart(2, '0')}-MTD`;
+        } else {
+          // Previous month: 1st to last day of previous month
+          startDate = new Date(endDate.getFullYear(), endDate.getMonth() - 1, 1);
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setFullYear(startDate.getFullYear());
+          endDate.setMonth(startDate.getMonth() + 1);
+          endDate.setDate(0);
+          endDate.setHours(23, 59, 59, 999);
+          periodName = `${startDate.getFullYear()}-${(startDate.getMonth() + 1).toString().padStart(2, '0')}`;
+        }
         break;
         
       default:
@@ -221,26 +231,27 @@ class EnergyRiteExcelReportGenerator {
         console.log(`📊 Excel Report - Found ${allSites.length} total sites across all cost codes`);
       }
       
-      // Use proper date formatting to avoid timezone conversion issues
-      const dateString = reportType === 'daily' ? 
-        `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}` :
-        startDate.toISOString().split('T')[0];
+      // For monthly reports, query by date range instead of single date
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
       
-      console.log(`📅 Using date string for query: ${dateString}`);
+      console.log(`📅 Querying sessions from ${startDateStr} to ${endDateStr}`);
       
       // Get operating sessions (COMPLETED status)
       let sessionsQuery = supabase
         .from('energy_rite_operating_sessions')
         .select('*')
         .eq('session_status', 'COMPLETED')
-        .eq('session_date', dateString);
+        .gte('session_date', startDateStr)
+        .lte('session_date', endDateStr);
       
       // Get fuel fills (FUEL_FILL_COMPLETED status)
       let fillsQuery = supabase
         .from('energy_rite_operating_sessions')
         .select('*')
         .eq('session_status', 'FUEL_FILL_COMPLETED')
-        .eq('session_date', dateString);
+        .gte('session_date', startDateStr)
+        .lte('session_date', endDateStr);
       
       // Filter by branch names if cost_code or site_id is provided
       if ((cost_code || site_id) && allSites.length > 0) {
@@ -818,21 +829,21 @@ class EnergyRiteExcelReportGenerator {
    * Generate daily report
    */
   async generateDailyReport(targetDate = null, cost_code = null, site_id = null) {
-    return this.generateExcelReport('daily', targetDate, cost_code, site_id);
+    return this.generateExcelReport('daily', targetDate, cost_code, site_id, 'previous');
   }
   
   /**
    * Generate weekly report (last 7 days)
    */
   async generateWeeklyReport(targetDate = null, cost_code = null, site_id = null) {
-    return this.generateExcelReport('weekly', targetDate, cost_code, site_id);
+    return this.generateExcelReport('weekly', targetDate, cost_code, site_id, 'previous');
   }
   
   /**
    * Generate monthly report
    */
-  async generateMonthlyReport(targetDate = null, cost_code = null, site_id = null) {
-    return this.generateExcelReport('monthly', targetDate, cost_code, site_id);
+  async generateMonthlyReport(targetDate = null, cost_code = null, site_id = null, month_type = 'previous') {
+    return this.generateExcelReport('monthly', targetDate, cost_code, site_id, month_type);
   }
 }
 

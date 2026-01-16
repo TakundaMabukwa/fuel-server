@@ -14,7 +14,8 @@ class EnergyRiteReportDocumentsController {
         target_date = null,
         date = null, // Accept 'date' parameter from frontend
         cost_code = null,
-        site_id = null
+        site_id = null,
+        month_type = 'previous' // 'previous' or 'current' for monthly reports
       } = { ...req.body, ...req.query }; // Accept from both body and query params
       
       // Use 'date' if provided, otherwise fall back to 'target_date'
@@ -35,7 +36,8 @@ class EnergyRiteReportDocumentsController {
         report_type, 
         reportDate, 
         cost_code,
-        site_id
+        site_id,
+        month_type
       );
       
       // Send email with the report

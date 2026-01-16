@@ -597,8 +597,8 @@ async function detectContinuousOperations(targetDate, costCode = null, costCodes
       
       // Site qualifies as continuous if:
       // 1. Has operations on target date AND
-      // 2. Either total daily hours > 12 OR max streak > 20 hours
-      if (continuousHours > 0 && (continuousHours > 12 || maxStreak > 20)) {
+      // 2. Either total daily hours > 12 OR max streak > 12 hours
+      if (continuousHours > 0 && (continuousHours > 12 || maxStreak > 12)) {
         continuousOperationsSites.push({
           site,
           cost_code: siteSessions[0].cost_code,
@@ -606,7 +606,7 @@ async function detectContinuousOperations(targetDate, costCode = null, costCodes
           fuel_usage: Math.round(continuousFuel * 100) / 100,
           max_continuous_streak: Math.round(maxStreak * 100) / 100,
           sessions_today: siteSessions.filter(s => s.session_date === targetDate).length,
-          pattern: maxStreak > 20 ? 'Long continuous run' : 'Multiple extended sessions'
+          pattern: maxStreak > 12 ? 'Long continuous run' : 'Multiple extended sessions'
         });
       }
     });

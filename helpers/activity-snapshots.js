@@ -7,10 +7,19 @@ const axios = require('axios');
 class ActivitySnapshotManager {
   constructor() {
     this.timeSlots = {
-      morning: { start: 7, end: 12, name: 'Morning' },
-      afternoon: { start: 12, end: 17, name: 'Afternoon' },
-      evening: { start: 17, end: 24, name: 'Evening' }
+      morning: { start: 0, end: 8, name: 'Morning' },
+      afternoon: { start: 8, end: 16, name: 'Afternoon' },
+      evening: { start: 16, end: 0, name: 'Evening' }
     };
+  }
+
+  /**
+   * Convert server time to SA time (add 2 hours)
+   */
+  toSATime(date) {
+    const saDate = new Date(date);
+    saDate.setHours(saDate.getHours() + 2);
+    return saDate;
   }
 
   /**
@@ -22,36 +31,28 @@ class ActivitySnapshotManager {
       const currentHour = now.getHours();
       const currentDate = now.toISOString().split('T')[0];
       
-      // Determine time slot (allow any time for testing)
+      // Determine time slot
       let timeSlot = null;
       for (const [key, slot] of Object.entries(this.timeSlots)) {
-        if (currentHour >= slot.start && currentHour < slot.end) {
-          timeSlot = key;
-          break;
+        if (slot.start < slot.end) {
+          if (currentHour >= slot.start && currentHour < slot.end) {
+            timeSlot = key;
+            break;
+          }
+        } else {
+          // Handle wrap-around (e.g., 20-4)
+          if (currentHour >= slot.start || currentHour < slot.end) {
+            timeSlot = key;
+            break;
+          }
         }
       }
       
-      // If outside defined slots, assign based on hour for testing
-      if (!timeSlot) {
-        if (currentHour < 7) timeSlot = 'evening'; // Late night = evening
-        else if (currentHour >= 7 && currentHour < 12) timeSlot = 'morning';
-        else if (currentHour >= 12 && currentHour < 17) timeSlot = 'afternoon';
-        else timeSlot = 'evening';
-      }
+      if (!timeSlot) timeSlot = 'evening';
       
       // Get current vehicle data from API
-      const response = await axios.get('http://64.227.138.235:3000/api/energy-rite/vehicles');
-      const vehicles = response.data.data;
-      
-      // Get cost code lookup for vehicles
-      const { data: vehicleLookup } = await supabase
-        .from('energyrite_vehicle_lookup')
-        .select('plate, cost_code');
-        
-      const costCodeMap = {};
-      vehicleLookup?.forEach(v => {
-        costCodeMap[v.plate] = v.cost_code;
-      });
+      const response = await axios.get('http://209.38.217.58:8000/api/energyrite-sites');
+      const vehicles = response.data;
       
       // Calculate activity metrics
       const snapshot = {
@@ -67,23 +68,22 @@ class ActivitySnapshotManager {
       };
       
       vehicles.forEach(vehicle => {
-        const isActive = vehicle.drivername !== 'PTO OFF / ENGINE OFF';
+        const isActive = vehicle.DriverName && vehicle.DriverName !== '';
         const fuelVolume = parseFloat(vehicle.fuel_probe_1_volume_in_tank) || 0;
         const fuelPercentage = parseFloat(vehicle.fuel_probe_1_level_percentage) || 0;
-        const costCode = costCodeMap[vehicle.branch] || vehicle.cost_code || null;
         
         if (isActive) snapshot.active_vehicles++;
         snapshot.total_fuel_level += fuelVolume;
         
         snapshot.vehicles_data.push({
-          branch: vehicle.branch,
-          company: vehicle.company,
-          cost_code: costCode,
+          branch: vehicle.Plate,
+          company: 'KFC',
+          cost_code: vehicle.cost_code,
           is_active: isActive,
           fuel_level: fuelVolume,
           fuel_percentage: fuelPercentage,
-          engine_status: vehicle.engine_status,
-          last_activity: vehicle.last_activity_time
+          engine_status: vehicle.DriverName || '',
+          last_activity: vehicle.updated_at
         });
       });
       
