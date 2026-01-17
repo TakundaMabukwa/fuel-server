@@ -487,25 +487,22 @@ class EnhancedExecutiveDashboardController {
  */
 async function detectContinuousOperations(targetDate, costCode = null, costCodes = null) {
   try {
-    // Look at the last 3 days to detect continuous patterns
-    const threeDaysAgo = new Date(new Date(targetDate).getTime() - 3 * 24 * 60 * 60 * 1000);
-    const startDate = threeDaysAgo.toISOString().split('T')[0];
+    // Month-to-date: start from 1st of current month
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const endDate = yesterday.toISOString().split('T')[0];
+    
+    const today = new Date();
+    const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+    const startDateStr = startDate.toISOString().split('T')[0];
     
     let sessionsQuery = supabase
       .from('energy_rite_operating_sessions')
-      .select(`
-        branch,
-        cost_code,
-        session_date,
-        session_start_time,
-        session_end_time,
-        operating_hours,
-        total_usage
-      `)
-      .gte('session_date', startDate)
-      .lte('session_date', targetDate)
+      .select('branch, cost_code, session_date, operating_hours, total_usage')
+      .gte('session_date', startDateStr)
+      .lte('session_date', endDate)
       .eq('session_status', 'COMPLETED')
-      .order('branch, session_date, session_start_time');
+      .gt('operating_hours', 12);
       
     // Apply cost code filtering
     if (costCode || costCodes) {
@@ -528,88 +525,35 @@ async function detectContinuousOperations(targetDate, costCode = null, costCodes
     const { data: sessions, error } = await sessionsQuery;
     if (error) throw error;
     
-    // Group sessions by site
-    const siteSessionGroups = {};
+    // Group by site and sum hours
+    const siteMetrics = {};
     sessions.forEach(session => {
       const site = session.branch;
-      if (!siteSessionGroups[site]) {
-        siteSessionGroups[site] = [];
-      }
-      siteSessionGroups[site].push(session);
-    });
-    
-    const continuousOperationsSites = [];
-    
-    // Analyze each site for continuous operations
-    Object.entries(siteSessionGroups).forEach(([site, siteSessions]) => {
-      // Sort sessions by date and time
-      siteSessions.sort((a, b) => {
-        const dateCompare = new Date(a.session_date) - new Date(b.session_date);
-        if (dateCompare === 0) {
-          return a.session_start_time.localeCompare(b.session_start_time);
-        }
-        return dateCompare;
-      });
-      
-      // Check for continuous operation patterns
-      let continuousHours = 0;
-      let continuousFuel = 0;
-      let currentStreak = 0;
-      let maxStreak = 0;
-      let streakStart = null;
-      
-      // Look for sessions that indicate continuous operation
-      for (let i = 0; i < siteSessions.length; i++) {
-        const session = siteSessions[i];
-        const sessionHours = parseFloat(session.operating_hours || 0);
-        
-        // If session is on target date, include in calculations
-        if (session.session_date === targetDate) {
-          continuousHours += sessionHours;
-          continuousFuel += parseFloat(session.total_usage || 0);
-        }
-        
-        // Check for streaks (sessions close together in time)
-        if (i > 0) {
-          const prevSession = siteSessions[i - 1];
-          const timeDiff = calculateTimeDifference(prevSession, session);
-          
-          // If sessions are within 4 hours of each other, consider continuous
-          if (timeDiff <= 4) {
-            if (currentStreak === 0) {
-              streakStart = prevSession;
-              currentStreak = parseFloat(prevSession.operating_hours || 0);
-            }
-            currentStreak += sessionHours;
-          } else {
-            // Streak broken
-            maxStreak = Math.max(maxStreak, currentStreak);
-            currentStreak = 0;
-          }
-        } else {
-          currentStreak = sessionHours;
-        }
-      }
-      
-      maxStreak = Math.max(maxStreak, currentStreak);
-      
-      // Site qualifies as continuous if:
-      // 1. Has operations on target date AND
-      // 2. Either total daily hours > 12 OR max streak > 12 hours
-      if (continuousHours > 0 && (continuousHours > 12 || maxStreak > 12)) {
-        continuousOperationsSites.push({
+      if (!siteMetrics[site]) {
+        siteMetrics[site] = {
           site,
-          cost_code: siteSessions[0].cost_code,
-          total_hours: Math.round(continuousHours * 100) / 100,
-          fuel_usage: Math.round(continuousFuel * 100) / 100,
-          max_continuous_streak: Math.round(maxStreak * 100) / 100,
-          sessions_today: siteSessions.filter(s => s.session_date === targetDate).length,
-          pattern: maxStreak > 12 ? 'Long continuous run' : 'Multiple extended sessions'
-        });
+          cost_code: session.cost_code,
+          total_hours: 0,
+          fuel_usage: 0,
+          sessions_count: 0
+        };
       }
+      siteMetrics[site].total_hours += parseFloat(session.operating_hours || 0);
+      siteMetrics[site].fuel_usage += parseFloat(session.total_usage || 0);
+      siteMetrics[site].sessions_count++;
     });
     
-    return continuousOperationsSites.sort((a, b) => b.total_hours - a.total_hours);
+    const continuousOperationsSites = Object.values(siteMetrics).map(site => ({
+      site: site.site,
+      cost_code: site.cost_code,
+      total_hours: Math.round(site.total_hours * 100) / 100,
+      fuel_usage: Math.round(site.fuel_usage * 100) / 100,
+      max_continuous_streak: Math.round(site.total_hours * 100) / 100,
+      sessions_today: site.sessions_count,
+      pattern: 'Long continuous run'
+    })).sort((a, b) => b.total_hours - a.total_hours);
+    
+    return continuousOperationsSites;
     
   } catch (error) {
     console.error('Error detecting continuous operations:', error);
