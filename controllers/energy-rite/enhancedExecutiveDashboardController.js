@@ -216,7 +216,40 @@ class EnhancedExecutiveDashboardController {
       
       // Get unique sites that operated during the period
       const sitesOperatedTotal = [...new Set(sessions.map(s => s.branch))];
-      const totalSites = sitesOperatedTotal.length;
+      
+      // Get ALL sites from lookup table (with or without cost code filtering)
+      let allSitesForCostCode = sitesOperatedTotal;
+      if (finalCostCode || finalCostCodes) {
+        const costCenterAccess = require('../../helpers/cost-center-access');
+        let accessibleCostCodes = [];
+        
+        if (finalCostCodes) {
+          const codeArray = finalCostCodes.split(',').map(c => c.trim());
+          for (const code of codeArray) {
+            const accessible = await costCenterAccess.getAccessibleCostCenters(code);
+            accessibleCostCodes.push(...accessible);
+          }
+        } else if (finalCostCode) {
+          accessibleCostCodes = await costCenterAccess.getAccessibleCostCenters(finalCostCode);
+        }
+        
+        // Get ALL sites from lookup table for these cost codes
+        const { data: allVehiclesForCostCode } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate')
+          .in('cost_code', accessibleCostCodes);
+        
+        allSitesForCostCode = allVehiclesForCostCode?.map(v => v.plate) || [];
+      } else {
+        // No cost code filter - get ALL sites from lookup table
+        const { data: allVehicles } = await supabase
+          .from('energyrite_vehicle_lookup')
+          .select('plate');
+        
+        allSitesForCostCode = allVehicles?.map(v => v.plate) || [];
+      }
+      
+      const totalSites = allSitesForCostCode.length;
       
       // Get sites with combined fuel fills
       const sitesWithFills = [...new Set(combinedFills.map(f => f.branch))];
@@ -369,6 +402,7 @@ class EnhancedExecutiveDashboardController {
         // Key metrics you requested (now cumulative)
         key_metrics: {
           total_sites_operated: totalSites,
+          sites_list: allSitesForCostCode,
           total_litres_used: Math.round(totalLitresUsed * 100) / 100,
           total_litres_filled: Math.round(totalLitresFilled * 100) / 100,
           net_fuel_consumption: Math.round((totalLitresUsed - totalLitresFilled) * 100) / 100,
