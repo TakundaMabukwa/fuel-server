@@ -525,31 +525,15 @@ async function detectContinuousOperations(targetDate, costCode = null, costCodes
     const { data: sessions, error } = await sessionsQuery;
     if (error) throw error;
     
-    // Group by site and sum hours
-    const siteMetrics = {};
-    sessions.forEach(session => {
-      const site = session.branch;
-      if (!siteMetrics[site]) {
-        siteMetrics[site] = {
-          site,
-          cost_code: session.cost_code,
-          total_hours: 0,
-          fuel_usage: 0,
-          sessions_count: 0
-        };
-      }
-      siteMetrics[site].total_hours += parseFloat(session.operating_hours || 0);
-      siteMetrics[site].fuel_usage += parseFloat(session.total_usage || 0);
-      siteMetrics[site].sessions_count++;
-    });
-    
-    const continuousOperationsSites = Object.values(siteMetrics).map(site => ({
-      site: site.site,
-      cost_code: site.cost_code,
-      total_hours: Math.round(site.total_hours * 100) / 100,
-      fuel_usage: Math.round(site.fuel_usage * 100) / 100,
-      max_continuous_streak: Math.round(site.total_hours * 100) / 100,
-      sessions_today: site.sessions_count,
+    // Return individual sessions, not grouped
+    const continuousOperationsSites = sessions.map(session => ({
+      site: session.branch,
+      cost_code: session.cost_code,
+      session_date: session.session_date,
+      total_hours: Math.round(parseFloat(session.operating_hours) * 100) / 100,
+      fuel_usage: Math.round(parseFloat(session.total_usage || 0) * 100) / 100,
+      max_continuous_streak: Math.round(parseFloat(session.operating_hours) * 100) / 100,
+      sessions_today: 1,
       pattern: 'Long continuous run'
     })).sort((a, b) => b.total_hours - a.total_hours);
     
