@@ -5,22 +5,22 @@ const activitySnapshots = require('./activity-snapshots');
 function startSnapshotScheduler() {
   console.log('🕕 Starting Energy Rite snapshot scheduler...');
   
-  // 10:00 AM server = 12:00 PM SA (end of morning slot)
-  cron.schedule('0 10 * * *', async () => {
+  // 6:00 AM server = 8:00 AM SA (end of morning slot)
+  cron.schedule('0 6 * * *', async () => {
     await activitySnapshots.takeSnapshot();
   });
   
-  // 6:00 PM server = 8:00 PM SA (end of afternoon slot)
-  cron.schedule('0 18 * * *', async () => {
+  // 2:00 PM server = 4:00 PM SA (end of afternoon slot)
+  cron.schedule('0 14 * * *', async () => {
     await activitySnapshots.takeSnapshot();
   });
   
-  // 2:00 AM server = 4:00 AM SA (end of evening slot)
-  cron.schedule('0 2 * * *', async () => {
+  // 10:00 PM server = 12:00 AM SA (end of evening slot)
+  cron.schedule('0 22 * * *', async () => {
     await activitySnapshots.takeSnapshot();
   });
   
-  console.log('✅ Snapshot scheduler started - capturing at 10:00, 18:00, and 02:00 server time');
+  console.log('✅ Snapshot scheduler started - capturing at 06:00, 14:00, and 22:00 server time');
 }
 
 module.exports = { startSnapshotScheduler };

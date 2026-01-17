@@ -63,18 +63,19 @@ class EnergyRiteActivityReportController {
     try {
       const { 
         site, 
-        startDate, 
-        endDate, 
         costCode,
         costCodes 
       } = req.query;
 
-      // Default to last 7 days if no dates provided
-      const defaultEndDate = new Date();
-      const defaultStartDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      // Month-to-date system: end date is always yesterday
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const end = yesterday.toISOString().split('T')[0];
       
-      const start = startDate || defaultStartDate.toISOString().split('T')[0];
-      const end = endDate || defaultEndDate.toISOString().split('T')[0];
+      // Start date is the 1st of the current month
+      const today = new Date();
+      const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+      const start = startDate.toISOString().split('T')[0];
 
       // Get all sites with cost codes
       const { data: allVehicles } = await supabase

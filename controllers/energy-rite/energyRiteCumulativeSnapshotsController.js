@@ -15,11 +15,15 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
       });
     }
 
+    // Month-to-date system: end date is always yesterday
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const endDate = yesterday.toISOString().split('T')[0];
+    
+    // Start date is the 1st of the requested month
     const startDate = `${year}-${month.padStart(2, '0')}-01`;
-    const lastDay = new Date(year, month, 0).getDate();
-    const endDate = `${year}-${month.padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
 
-    console.log(`📅 Cumulative snapshots: ${startDate} to ${endDate}, Cost Code: ${cost_code || 'All'}`);
+    console.log(`📅 Cumulative snapshots (month-to-date): ${startDate} to ${endDate} (yesterday), Cost Code: ${cost_code || 'All'}`);
 
     // Get accessible cost codes if cost_code provided
     let accessibleCostCodes = [];
@@ -156,17 +160,14 @@ const getCumulativeMonthlySnapshots = async (req, res) => {
     });
 
     // Calculate monthly fuel usage from operating sessions
-    const startOfMonth = `${year}-${month.padStart(2, '0')}-01`;
-    const endOfMonth = `${year}-${month.padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
-    
-    console.log(`🔍 Querying sessions from ${startOfMonth} to ${endOfMonth}`);
+    console.log(`🔍 Querying sessions from ${startDate} to ${endDate} (yesterday)`);
     
     // Query all sessions for the period without cost code filter initially
     let sessionsQuery = supabase
       .from('energy_rite_operating_sessions')
       .select('total_usage, session_date, session_start_time, cost_code, branch')
-      .gte('session_date', startOfMonth)
-      .lte('session_date', endOfMonth)
+      .gte('session_date', startDate)
+      .lte('session_date', endDate)
       .eq('session_status', 'COMPLETED');
     
     const { data: allSessions, error: sessionsError } = await sessionsQuery;

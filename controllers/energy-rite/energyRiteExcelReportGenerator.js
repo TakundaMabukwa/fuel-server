@@ -504,7 +504,7 @@ class EnergyRiteExcelReportGenerator {
       'Closing Fuel',
       'Usage',
       'Fill',
-      'Efficiency',
+      'Liters Used Per Hour',
       'Cost'
     ]);
     
@@ -537,7 +537,7 @@ class EnergyRiteExcelReportGenerator {
         (site.total_fuel_usage || 0).toFixed(2),
         (site.total_fuel_filled || 0).toFixed(2),
         (site.avg_efficiency || 0).toFixed(2),
-        `R${(site.total_cost || 0).toFixed(2)}`
+        site.total_cost > 0 && site.total_fuel_usage > 0 ? `@R${(site.total_cost / site.total_fuel_usage).toFixed(2)} = R${(site.total_cost || 0).toFixed(2)}` : 'R0.00'
       ]);
       
       // Style main row with alternating professional colors
@@ -585,8 +585,8 @@ class EnergyRiteExcelReportGenerator {
             `${(session.closing_fuel || 0).toFixed(1)}L`,
             `${(session.total_usage || 0).toFixed(2)}L`,
             `${(session.total_fill || 0).toFixed(2)}L`,
-            `${(session.liter_usage_per_hour || 0).toFixed(2)}L/h`,
-            `R${(session.cost_for_usage || 0).toFixed(2)}`
+            `${(session.liter_usage_per_hour || (session.operating_hours > 0 ? session.total_usage / session.operating_hours : 0)).toFixed(2)}L/h`,
+            `@R${(session.cost_per_liter || 0).toFixed(2)} = R${(session.cost_for_usage || 0).toFixed(2)}`
           ]);
           
           // Style session row (blue tint for sessions)
@@ -722,7 +722,11 @@ class EnergyRiteExcelReportGenerator {
       sessionsData.sites.reduce((sum, site) => sum + site.total_fuel_usage, 0).toFixed(2),
       sessionsData.sites.reduce((sum, site) => sum + site.total_fuel_filled, 0).toFixed(2),
       '',
-      `R${sessionsData.sites.reduce((sum, site) => sum + site.total_cost, 0).toFixed(2)}`
+      (() => {
+        const totalCost = sessionsData.sites.reduce((sum, site) => sum + site.total_cost, 0);
+        const totalUsage = sessionsData.sites.reduce((sum, site) => sum + site.total_fuel_usage, 0);
+        return totalCost > 0 ? `@R${(totalCost / totalUsage).toFixed(2)} = R${totalCost.toFixed(2)}` : 'R0.00';
+      })()
     ]);
     
     // Add breakdown summary

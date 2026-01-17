@@ -15,29 +15,27 @@ class EnhancedExecutiveDashboardController {
   async getExecutiveDashboard(req, res) {
     try {
       const { 
-        date, 
-        start_date,
-        end_date,
         costCode, 
         cost_code, 
         costCodes, 
-        cost_codes,
-        period = 30 
+        cost_codes
       } = req.query;
       
       // Support both camelCase and snake_case parameter names
       const finalCostCode = costCode || cost_code;
       const finalCostCodes = costCodes || cost_codes;
-      const finalStartDate = start_date;
-      const finalEndDate = end_date;
       
-      // Use provided date or today for end date
-      const targetDate = finalEndDate || date || new Date().toISOString().split('T')[0];
+      // Month-to-date system: end date is always yesterday
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const targetDate = yesterday.toISOString().split('T')[0];
       
-      // Calculate cumulative period start date
-      const endDate = new Date(targetDate);
-      const startDate = finalStartDate ? new Date(finalStartDate) : new Date(endDate.getTime() - parseInt(period) * 24 * 60 * 60 * 1000);
+      // Start date is the 1st of the current month
+      const today = new Date();
+      const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
       const startDateStr = startDate.toISOString().split('T')[0];
+      
+      const period = Math.ceil((yesterday - startDate) / (24 * 60 * 60 * 1000));
       
       console.log(`🎯 Executive Dashboard: ${startDateStr} to ${targetDate} (${period} days cumulative)`);
       console.log(`🔍 Cost code filter: ${finalCostCode || finalCostCodes || 'None'}`);
