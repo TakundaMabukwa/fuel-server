@@ -16,7 +16,8 @@ class EnergyRiteWebSocketClient {
     this.pendingClosures = new Map();
     this.recentFuelData = new Map();
     this.pendingFuelFills = new Map();
-    this.fuelFillWatchers = new Map(); // Track 5-minute watchers for highest fuel
+    this.fuelFillWatchers = new Map(); // Track 10-minute watchers for highest fuel
+    this.preFillWatchers = new Map(); // Track lowest fuel before fill status appears
     
     // Message queue sorter
     this.messageQueue = [];
@@ -152,6 +153,11 @@ class EnergyRiteWebSocketClient {
       // Then handle fuel fill status
       const hasFuelFillStatus = this.parseFuelFillStatus(vehicleData.DriverName);
       
+      // Track lowest fuel level before fill status appears
+      if (!hasFuelFillStatus && fuelData.hasFuelData) {
+        this.trackPreFillLowest(actualBranch, fuelData, vehicleData.LocTime);
+      }
+      
       if (hasFuelFillStatus) {
         await this.handleFuelFillStart(actualBranch, vehicleData);
       } else {
@@ -229,15 +235,57 @@ class EnergyRiteWebSocketClient {
     return { hasFuelData: false };
   }
 
+  trackPreFillLowest(plate, fuelData, locTime) {
+    try {
+      if (!this.preFillWatchers.has(plate)) {
+        this.preFillWatchers.set(plate, {
+          lowestFuel: fuelData.fuel_probe_1_volume_in_tank,
+          lowestPercentage: fuelData.fuel_probe_1_level_percentage,
+          lowestLocTime: locTime,
+          lastUpdate: Date.now()
+        });
+      } else {
+        const watcher = this.preFillWatchers.get(plate);
+        const currentFuel = fuelData.fuel_probe_1_volume_in_tank;
+        
+        // Update if lower
+        if (currentFuel < watcher.lowestFuel) {
+          watcher.lowestFuel = currentFuel;
+          watcher.lowestPercentage = fuelData.fuel_probe_1_level_percentage;
+          watcher.lowestLocTime = locTime;
+        }
+        watcher.lastUpdate = Date.now();
+        
+        // Clean up old watchers (older than 30 minutes)
+        if (Date.now() - watcher.lastUpdate > 30 * 60 * 1000) {
+          this.preFillWatchers.delete(plate);
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Error tracking pre-fill lowest for ${plate}:`, error.message);
+    }
+  }
+
   async handleFuelFillStart(plate, vehicleData) {
     try {
       const currentTime = this.convertLocTime(vehicleData.LocTime);
       const hasFuelData = vehicleData.fuel_probe_1_volume_in_tank && parseFloat(vehicleData.fuel_probe_1_volume_in_tank) > 0;
       
-      if (hasFuelData) {
-        const openingFuel = parseFloat(vehicleData.fuel_probe_1_volume_in_tank);
-        const openingPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
-        
+      // Check if we have pre-fill lowest data
+      let openingFuel, openingPercentage;
+      if (this.preFillWatchers.has(plate)) {
+        const preFill = this.preFillWatchers.get(plate);
+        openingFuel = preFill.lowestFuel;
+        openingPercentage = preFill.lowestPercentage;
+        console.log(`⛽ FUEL FILL START: ${plate} - Using lowest pre-fill: ${openingFuel}L`);
+        this.preFillWatchers.delete(plate); // Clean up
+      } else if (hasFuelData) {
+        openingFuel = parseFloat(vehicleData.fuel_probe_1_volume_in_tank);
+        openingPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
+        console.log(`⛽ FUEL FILL START: ${plate} - Using current fuel: ${openingFuel}L`);
+      }
+      
+      if (openingFuel) {
         this.pendingFuelFills.set(plate, {
           startTime: currentTime,
           startLocTime: vehicleData.LocTime,
