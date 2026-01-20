@@ -4,7 +4,7 @@ const { supabase } = require('./supabase-client');
 
 async function importMonthly7() {
   try {
-    const workbook = XLSX.readFile('./historical-imports/Monthly (7).xlsx');
+    const workbook = XLSX.readFile('./historical-imports/Monthly (8).xlsx');
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet);
