@@ -2,187 +2,148 @@ const WebSocket = require('ws');
 
 const wss = new WebSocket.Server({ port: 8090 });
 
-console.log('🧪 Test WebSocket Server running on ws://localhost:8090');
-console.log('⏱️  Server will auto-stop in 5 minutes\n');
-
-// Auto-stop after 5 minutes
-setTimeout(() => {
-  console.log('\n⏰ 5 minutes elapsed - shutting down test server');
-  wss.close(() => {
-    console.log('✅ Server stopped');
-    process.exit(0);
-  });
-}, 300000);
-
-const vehicles = [
-  { Plate: 'TEST-001', Latitude: -26.13608, Longitude: 28.34938, Mileage: 100, fuelLevel: 150, fuelVolume: 450 },
-  { Plate: 'TEST-002', Latitude: -26.07517, Longitude: 28.06441, Mileage: 200, fuelLevel: 200, fuelVolume: 600 }
-];
+console.log('WebSocket server started on ws://localhost:8090');
 
 wss.on('connection', (ws) => {
-  console.log('✅ Client connected');
-
-  // Simulate ENGINE ON scenario (status without fuel, then fuel data)
-  setTimeout(() => {
-    console.log('\n🚗 Simulating ENGINE ON for TEST-001...');
+  console.log('Client connected');
+  
+  let messageCount = 0;
+  const startTime = Date.now();
+  
+  const interval = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const seconds = Math.floor(elapsed / 1000);
     
-    // Message 1: ENGINE ON status (no fuel data)
-    const engineOnMsg = {
-      Plate: 'TEST-001',
-      Speed: 0,
-      Latitude: -26.13608,
-      Longitude: 28.34938,
-      Quality: '53.15.1.99',
-      Mileage: 100,
-      Pocsagstr: '53.15.1.99',
+    // Stop after 5 minutes
+    if (seconds >= 300) {
+      clearInterval(interval);
+      console.log('5 minutes completed, stopping data stream');
+      return;
+    }
+    
+    const now = new Date();
+    const locTime = now.toISOString().slice(0, 19).replace('T', ' ');
+    
+    // Base messages for 3 vehicles
+    const messages = [];
+    
+    // FARRAMERE - no fuel data
+    messages.push({
+      Plate: 'FARRAMERE',
+      Speed: Math.floor(Math.random() * 60),
+      Latitude: -26.14978,
+      Longitude: 28.29961,
+      Quality: '61.13.2.99',
+      Mileage: 2462 + seconds,
+      Pocsagstr: '61.13.2.99',
       Head: '',
       Geozone: '',
-      DriverName: 'ENGINE ON',
+      DriverName: '',
       NameEvent: '',
       Temperature: '',
-      LocTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      LocTime: locTime,
       message_type: 405
-    };
-    ws.send(JSON.stringify(engineOnMsg));
-    console.log('📤 Sent ENGINE ON (no fuel)');
-
-    // Message 2: Fuel data arrives 2 seconds later
-    setTimeout(() => {
-      const fuelMsg = {
-        Plate: 'TEST-001',
-        Speed: 0,
-        Latitude: -26.13608,
-        Longitude: 28.34938,
-        Quality: '53.15.1.99',
-        Mileage: 100,
-        Pocsagstr: '53.15.1.99',
-        Head: '',
-        Geozone: '',
-        DriverName: '',
-        NameEvent: '',
-        Temperature: '25,405,1007,2020,0960,2021,1C20,2022,18,2023,5A',
-        LocTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
-        message_type: 405,
-        fuel_probe_1_level: '150.0',
-        fuel_probe_1_volume_in_tank: '450.0',
-        fuel_probe_1_temperature: '24',
-        fuel_probe_1_level_percentage: '75'
-      };
-      ws.send(JSON.stringify(fuelMsg));
-      console.log('📤 Sent fuel data (150L)');
-    }, 2000);
-  }, 3000);
-
-  // Simulate FUEL FILL scenario
-  setTimeout(() => {
-    console.log('\n⛽ Simulating FUEL FILL for TEST-002...');
+    });
     
-    // Message 1: FUEL FILL status (no fuel data)
-    const fuelFillMsg = {
-      Plate: 'TEST-002',
-      Speed: 0,
-      Latitude: -26.07517,
-      Longitude: 28.06441,
-      Quality: '60.115.1.14',
-      Mileage: 200,
-      Pocsagstr: '60.115.1.14',
+    // MOBILE 3 - has fuel data + PTO events
+    const mobile3 = {
+      Plate: 'MOBILE 3',
+      Speed: Math.floor(Math.random() * 40),
+      Latitude: -25.931415,
+      Longitude: 27.996146,
+      Quality: '60.42.2.60',
+      Mileage: 758 + seconds,
+      Pocsagstr: '60.42.2.60',
       Head: '',
       Geozone: '',
-      DriverName: 'FUEL FILL',
+      DriverName: '',
       NameEvent: '',
-      Temperature: '',
-      LocTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
-      message_type: 405
+      Temperature: '25,405,1007,2020,0320,2021,0740,2022,1F,2023,26',
+      LocTime: locTime,
+      message_type: 405,
+      fuel_probe_1_level: '80.0',
+      fuel_probe_1_volume_in_tank: (185.6 + Math.random() * 2).toFixed(1),
+      fuel_probe_1_temperature: '31',
+      fuel_probe_1_level_percentage: '38'
     };
-    ws.send(JSON.stringify(fuelFillMsg));
-    console.log('📤 Sent FUEL FILL (no fuel)');
-
-    // Simulate fuel rising over 5 minutes
-    let currentFuel = 200;
-    const interval = setInterval(() => {
-      currentFuel += 20; // Fuel rising
-      const fuelMsg = {
-        Plate: 'TEST-002',
-        Speed: 0,
-        Latitude: -26.07517,
-        Longitude: 28.06441,
-        Quality: '60.115.1.14',
-        Mileage: 200,
-        Pocsagstr: '60.115.1.14',
-        Head: '',
-        Geozone: '',
-        DriverName: '',
-        NameEvent: '',
-        Temperature: `25,405,1007,2020,${currentFuel.toString(16).toUpperCase().padStart(4, '0')},2021,1C20,2022,18,2023,5A`,
-        LocTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
-        message_type: 405,
-        fuel_probe_1_level: currentFuel.toString(),
-        fuel_probe_1_volume_in_tank: (currentFuel * 3).toString(),
-        fuel_probe_1_temperature: '24',
-        fuel_probe_1_level_percentage: Math.min(99, Math.floor(currentFuel / 3)).toString()
-      };
-      ws.send(JSON.stringify(fuelMsg));
-      console.log(`📤 Sent fuel data (${currentFuel}L)`);
-
-      if (currentFuel >= 300) {
-        clearInterval(interval);
-        console.log('✅ Fuel fill complete - highest: 300L');
+    
+    // PTO ON at 2 minutes (120 seconds) - no fuel data
+    if (seconds === 120) {
+      mobile3.DriverName = 'PTO ON';
+      delete mobile3.fuel_probe_1_level;
+      delete mobile3.fuel_probe_1_volume_in_tank;
+      delete mobile3.fuel_probe_1_temperature;
+      delete mobile3.fuel_probe_1_level_percentage;
+      console.log(`[${seconds}s] PTO ON event sent`);
+    }
+    // PTO OFF at 4 minutes (240 seconds) - no fuel data
+    else if (seconds === 240) {
+      mobile3.DriverName = 'PTO OFF';
+      delete mobile3.fuel_probe_1_level;
+      delete mobile3.fuel_probe_1_volume_in_tank;
+      delete mobile3.fuel_probe_1_temperature;
+      delete mobile3.fuel_probe_1_level_percentage;
+      console.log(`[${seconds}s] PTO OFF event sent`);
+    }
+    
+    messages.push(mobile3);
+    
+    // RANDBURG - has fuel data + fuel fill event
+    const randburg = {
+      Plate: 'RANDBURG',
+      Speed: 0,
+      Latitude: -26.09388,
+      Longitude: 28.00511,
+      Quality: '62.138.2.81',
+      Mileage: 2761 + seconds,
+      Pocsagstr: '62.138.2.81',
+      Head: '',
+      Geozone: '',
+      DriverName: '',
+      NameEvent: '',
+      Temperature: '25,405,1007,2020,0320,2021,0740,2022,1F,2023,26',
+      LocTime: locTime,
+      message_type: 405,
+      fuel_probe_1_level: '50.0',
+      fuel_probe_1_volume_in_tank: '120.5',
+      fuel_probe_1_temperature: '28',
+      fuel_probe_1_level_percentage: '50'
+    };
+    
+    // Possible Fuel Fill at 1 minute (60 seconds) - no fuel data
+    if (seconds === 60) {
+      randburg.DriverName = 'POSSIBLE FUEL FILL';
+      delete randburg.fuel_probe_1_level;
+      delete randburg.fuel_probe_1_volume_in_tank;
+      delete randburg.fuel_probe_1_temperature;
+      delete randburg.fuel_probe_1_level_percentage;
+      console.log(`[${seconds}s] POSSIBLE FUEL FILL event sent`);
+    }
+    // Simulate fuel increasing after fill starts
+    else if (seconds > 60 && seconds <= 180) {
+      const fillProgress = (seconds - 60) / 120;
+      randburg.fuel_probe_1_volume_in_tank = (120.5 + fillProgress * 80).toFixed(1);
+      randburg.fuel_probe_1_level_percentage = Math.min(95, 50 + Math.floor(fillProgress * 45)).toString();
+    }
+    
+    messages.push(randburg);
+    
+    // Send all messages
+    messages.forEach(msg => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+        messageCount++;
       }
-    }, 30000); // Every 30 seconds
-  }, 10000);
-
-  // Simulate ENGINE OFF scenario
-  setTimeout(() => {
-    console.log('\n🛑 Simulating ENGINE OFF for TEST-001...');
+    });
     
-    // Message 1: ENGINE OFF status (no fuel data)
-    const engineOffMsg = {
-      Plate: 'TEST-001',
-      Speed: 0,
-      Latitude: -26.13608,
-      Longitude: 28.34938,
-      Quality: '53.15.1.99',
-      Mileage: 150,
-      Pocsagstr: '53.15.1.99',
-      Head: '',
-      Geozone: '',
-      DriverName: 'ENGINE OFF',
-      NameEvent: '',
-      Temperature: '',
-      LocTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
-      message_type: 405
-    };
-    ws.send(JSON.stringify(engineOffMsg));
-    console.log('📤 Sent ENGINE OFF (no fuel)');
-
-    // Message 2: Fuel data arrives 2 seconds later
-    setTimeout(() => {
-      const fuelMsg = {
-        Plate: 'TEST-001',
-        Speed: 0,
-        Latitude: -26.13608,
-        Longitude: 28.34938,
-        Quality: '53.15.1.99',
-        Mileage: 150,
-        Pocsagstr: '53.15.1.99',
-        Head: '',
-        Geozone: '',
-        DriverName: '',
-        NameEvent: '',
-        Temperature: '25,405,1007,2020,0870,2021,1900,2022,18,2023,5A',
-        LocTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
-        message_type: 405,
-        fuel_probe_1_level: '135.0',
-        fuel_probe_1_volume_in_tank: '400.0',
-        fuel_probe_1_temperature: '24',
-        fuel_probe_1_level_percentage: '67'
-      };
-      ws.send(JSON.stringify(fuelMsg));
-      console.log('📤 Sent fuel data (135L) - consumed 15L');
-    }, 2000);
-  }, 180000); // 3 minutes after ENGINE ON
-
+    if (seconds % 30 === 0) {
+      console.log(`[${seconds}s] Sent ${messageCount} messages`);
+    }
+    
+  }, 2000); // Send every 2 seconds
+  
   ws.on('close', () => {
-    console.log('❌ Client disconnected');
+    clearInterval(interval);
+    console.log('Client disconnected');
   });
 });

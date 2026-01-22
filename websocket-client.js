@@ -195,13 +195,16 @@ class EnergyRiteWebSocketClient {
         if (fuelHistory.length > 20) fuelHistory.shift();
         
         // Also store in SQLite for persistence across restarts
-        pendingFuelDb.storeFuelHistory(
-          actualBranch,
-          fuelData.fuel_probe_1_volume_in_tank,
-          fuelData.fuel_probe_1_level_percentage,
-          vehicleData.LocTime,
-          fuelTimestamp
-        );
+        // Only store if fuel volume is valid (> 0)
+        if (fuelData.fuel_probe_1_volume_in_tank > 0) {
+          pendingFuelDb.storeFuelHistory(
+            actualBranch,
+            fuelData.fuel_probe_1_volume_in_tank,
+            fuelData.fuel_probe_1_level_percentage,
+            vehicleData.LocTime,
+            fuelTimestamp
+          );
+        }
         
         // Update any pending sessions waiting for opening fuel data
         await this.updatePendingSessionFuel(actualBranch, vehicleData);
@@ -209,8 +212,8 @@ class EnergyRiteWebSocketClient {
         // Update any pending closures waiting for closing fuel data
         await this.updatePendingClosure(actualBranch, vehicleData);
         
-        // Passive fill detection - detect fills without status message
-        await this.detectPassiveFill(actualBranch, fuelData, vehicleData.LocTime);
+        // ❌ DISABLED: Passive fill detection - only use status-based detection
+        // await this.detectPassiveFill(actualBranch, fuelData, vehicleData.LocTime);
       }
       
       // Handle engine status FIRST (before fuel fill processing)
@@ -467,22 +470,25 @@ class EnergyRiteWebSocketClient {
         return;
       }
       
-      // Check if we have pre-fill lowest data from SQLite
+      // Get fuel data from closest LocTime BEFORE fill status
       let openingFuel, openingPercentage;
-      const preFill = pendingFuelDb.getPreFillWatcher(plate);
+      const closestFuel = this.findClosestFuelDataBefore(plate, vehicleData.LocTime);
       
-      if (preFill) {
-        openingFuel = preFill.lowest_fuel;
-        openingPercentage = preFill.lowest_percentage;
-        console.log(`⛽ FUEL FILL START: ${plate} - Using lowest pre-fill: ${openingFuel}L`);
-        pendingFuelDb.deletePreFillWatcher(plate); // Clean up
+      console.log(`🔍 FILL START DEBUG for ${plate}:`);
+      console.log(`   Fill status LocTime: ${vehicleData.LocTime}`);
+      console.log(`   Closest fuel found: ${closestFuel ? closestFuel.fuel_probe_1_volume_in_tank + 'L' : 'NONE'}`);
+      
+      if (closestFuel && closestFuel.fuel_probe_1_volume_in_tank > 0) {
+        openingFuel = closestFuel.fuel_probe_1_volume_in_tank;
+        openingPercentage = closestFuel.fuel_probe_1_level_percentage;
+        console.log(`⛽ FUEL FILL START: ${plate} - Using closest fuel before status: ${openingFuel}L`);
       } else if (hasFuelData) {
         openingFuel = parseFloat(vehicleData.fuel_probe_1_volume_in_tank);
         openingPercentage = parseFloat(vehicleData.fuel_probe_1_level_percentage) || 0;
         console.log(`⛽ FUEL FILL START: ${plate} - Using current fuel: ${openingFuel}L`);
       }
       
-      if (openingFuel) {
+      if (openingFuel && openingFuel > 0) {
         pendingFuelDb.setPendingFuelFill(plate, {
           startTime: currentTime,
           startLocTime: vehicleData.LocTime,
@@ -884,7 +890,8 @@ class EnergyRiteWebSocketClient {
       for (const fuelData of fuelHistory) {
         const diff = targetTime - fuelData.timestamp;
         // Only consider fuel data BEFORE status change (diff > 0 means fuelData is before target)
-        if (diff > 0 && diff < minDiff) {
+        // AND fuel value must be > 0
+        if (diff > 0 && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank > 0) {
           minDiff = diff;
           closestFuel = fuelData;
         }
@@ -896,7 +903,8 @@ class EnergyRiteWebSocketClient {
       const dbHistory = pendingFuelDb.getFuelHistoryBefore(plate, targetTime, 5);
       for (const entry of dbHistory) {
         const diff = targetTime - entry.timestamp;
-        if (diff > 0 && diff < minDiff) {
+        // Only consider non-zero fuel values
+        if (diff > 0 && diff < minDiff && entry.fuel_volume > 0) {
           minDiff = diff;
           closestFuel = {
             fuel_probe_1_volume_in_tank: entry.fuel_volume,
@@ -910,10 +918,11 @@ class EnergyRiteWebSocketClient {
     
     // Only use if within 5 minutes before status
     if (closestFuel && minDiff <= 5 * 60 * 1000) {
-      console.log(`🎯 Found fuel data BEFORE ${plate}: ${(minDiff / 1000).toFixed(0)}s before status`);
+      console.log(`🎯 Found fuel data BEFORE ${plate}: ${closestFuel.fuel_probe_1_volume_in_tank}L at ${(minDiff / 1000).toFixed(0)}s before status`);
       return closestFuel;
     }
     
+    console.log(`⚠️ No valid fuel data found before ${plate} within 5 minutes`);
     return null;
   }
 
