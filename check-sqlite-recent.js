@@ -4,14 +4,21 @@ const pendingFuelDb = require('./pending-fuel-db');
   console.log('🔍 Checking SQLite for recent fuel data...\n');
 
   await pendingFuelDb.initDatabase();
+  const db = pendingFuelDb.getDb();
 
   // Get last 20 fuel entries from ANY vehicle
-  const rows = pendingFuelDb.db.prepare(`
+  const stmt = db.prepare(`
     SELECT plate, fuel_volume, fuel_percentage, loc_time, timestamp 
     FROM fuel_history 
     ORDER BY timestamp DESC 
     LIMIT 20
-  `).all();
+  `);
+  
+  const rows = [];
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject());
+  }
+  stmt.free();
 
   if (rows.length === 0) {
     console.log('❌ No fuel data found in SQLite at all!');
