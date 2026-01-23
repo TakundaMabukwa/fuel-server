@@ -5,15 +5,22 @@ const pendingFuelDb = require('./pending-fuel-db');
 
   // Initialize database
   await pendingFuelDb.initDatabase();
+  const db = pendingFuelDb.getDb();
 
   // Get last 10 fuel entries for KROONSTAD2
-  const rows = pendingFuelDb.db.prepare(`
+  const stmt = db.prepare(`
     SELECT plate, fuel_volume, fuel_percentage, loc_time, timestamp 
     FROM fuel_history 
     WHERE plate = 'KROONSTAD2' 
     ORDER BY timestamp DESC 
     LIMIT 10
-  `).all();
+  `);
+  
+  const rows = [];
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject());
+  }
+  stmt.free();
 
   if (rows.length === 0) {
     console.log('❌ No fuel data found for KROONSTAD2 in SQLite');
