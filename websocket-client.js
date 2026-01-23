@@ -195,8 +195,8 @@ class EnergyRiteWebSocketClient {
         if (fuelHistory.length > 20) fuelHistory.shift();
         
         // Also store in SQLite for persistence across restarts
-        // Only store if fuel volume is valid (> 0)
-        if (fuelData.fuel_probe_1_volume_in_tank > 0) {
+        // Store all fuel values including 0 (empty tank)
+        if (fuelData.fuel_probe_1_volume_in_tank >= 0) {
           pendingFuelDb.storeFuelHistory(
             actualBranch,
             fuelData.fuel_probe_1_volume_in_tank,
@@ -835,6 +835,7 @@ class EnergyRiteWebSocketClient {
 
   findClosestFuelData(plate, targetLocTime) {
     const targetTime = new Date(this.convertLocTime(targetLocTime)).getTime();
+    const maxWindow = 30 * 60 * 1000; // 30 minutes in LocTime
     
     // First check in-memory cache
     const fuelHistory = this.recentFuelData.get(plate);
@@ -844,8 +845,9 @@ class EnergyRiteWebSocketClient {
     if (fuelHistory && fuelHistory.length > 0) {
       for (const fuelData of fuelHistory) {
         const diff = fuelData.timestamp - targetTime;
-        // Only consider fuel data AFTER status change (diff > 0)
-        if (diff > 0 && diff < minDiff) {
+        // Only consider fuel data AFTER status (diff > 0) AND within 30-min LocTime window
+        // Accept 0 values if device sends them (tank actually empty)
+        if (diff > 0 && diff <= maxWindow && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank >= 0) {
           minDiff = diff;
           nextFuel = fuelData;
         }
@@ -853,11 +855,13 @@ class EnergyRiteWebSocketClient {
     }
     
     // If not found in memory, check SQLite
-    if (!nextFuel || minDiff > 5 * 60 * 1000) {
-      const dbHistory = pendingFuelDb.getFuelHistoryAfter(plate, targetTime, 5);
+    if (!nextFuel) {
+      const dbHistory = pendingFuelDb.getFuelHistoryAfter(plate, targetTime, 50);
       for (const entry of dbHistory) {
         const diff = entry.timestamp - targetTime;
-        if (diff > 0 && diff < minDiff) {
+        // Only consider within 30-min LocTime window
+        // Accept 0 values if device sends them (tank actually empty)
+        if (diff > 0 && diff <= maxWindow && diff < minDiff && entry.fuel_volume >= 0) {
           minDiff = diff;
           nextFuel = {
             fuel_probe_1_volume_in_tank: entry.fuel_volume,
@@ -869,17 +873,18 @@ class EnergyRiteWebSocketClient {
       }
     }
     
-    // Only use if within 5 minutes after status
-    if (nextFuel && minDiff <= 5 * 60 * 1000) {
-      console.log(`🎯 Found next fuel data for ${plate}: ${(minDiff / 1000).toFixed(0)}s after status`);
+    if (nextFuel) {
+      console.log(`🎯 Found next fuel data for ${plate}: ${(minDiff / 1000).toFixed(0)}s after status (LocTime-based)`);
       return nextFuel;
     }
     
+    console.log(`⏳ No fuel data found within 30-min LocTime window after status for ${plate}, will retry when more data arrives`);
     return null;
   }
 
   findClosestFuelDataBefore(plate, targetLocTime) {
     const targetTime = new Date(this.convertLocTime(targetLocTime)).getTime();
+    const maxWindow = 30 * 60 * 1000; // 30 minutes in LocTime
     
     // First check in-memory cache
     const fuelHistory = this.recentFuelData.get(plate);
@@ -889,9 +894,9 @@ class EnergyRiteWebSocketClient {
     if (fuelHistory && fuelHistory.length > 0) {
       for (const fuelData of fuelHistory) {
         const diff = targetTime - fuelData.timestamp;
-        // Only consider fuel data BEFORE status change (diff > 0 means fuelData is before target)
-        // AND fuel value must be > 0
-        if (diff > 0 && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank > 0) {
+        // Only consider fuel data BEFORE status (diff > 0) AND within 30-min LocTime window
+        // Accept 0 values if device sends them (tank actually empty)
+        if (diff > 0 && diff <= maxWindow && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank >= 0) {
           minDiff = diff;
           closestFuel = fuelData;
         }
@@ -899,12 +904,13 @@ class EnergyRiteWebSocketClient {
     }
     
     // If not found in memory, check SQLite
-    if (!closestFuel || minDiff > 5 * 60 * 1000) {
-      const dbHistory = pendingFuelDb.getFuelHistoryBefore(plate, targetTime, 5);
+    if (!closestFuel) {
+      const dbHistory = pendingFuelDb.getFuelHistoryBefore(plate, targetTime, 50);
       for (const entry of dbHistory) {
         const diff = targetTime - entry.timestamp;
-        // Only consider non-zero fuel values
-        if (diff > 0 && diff < minDiff && entry.fuel_volume > 0) {
+        // Only consider within 30-min LocTime window
+        // Accept 0 values if device sends them (tank actually empty)
+        if (diff > 0 && diff <= maxWindow && diff < minDiff && entry.fuel_volume >= 0) {
           minDiff = diff;
           closestFuel = {
             fuel_probe_1_volume_in_tank: entry.fuel_volume,
@@ -916,13 +922,12 @@ class EnergyRiteWebSocketClient {
       }
     }
     
-    // Only use if within 5 minutes before status
-    if (closestFuel && minDiff <= 5 * 60 * 1000) {
-      console.log(`🎯 Found fuel data BEFORE ${plate}: ${closestFuel.fuel_probe_1_volume_in_tank}L at ${(minDiff / 1000).toFixed(0)}s before status`);
+    if (closestFuel) {
+      console.log(`🎯 Found fuel data BEFORE ${plate}: ${closestFuel.fuel_probe_1_volume_in_tank}L at ${(minDiff / 1000).toFixed(0)}s before status (LocTime-based)`);
       return closestFuel;
     }
     
-    console.log(`⚠️ No valid fuel data found before ${plate} within 5 minutes`);
+    console.log(`⏳ No fuel data found within 30-min LocTime window before status for ${plate}, will retry when more data arrives`);
     return null;
   }
 
