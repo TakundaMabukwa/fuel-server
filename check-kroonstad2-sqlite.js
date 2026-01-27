@@ -11,7 +11,7 @@ const pendingFuelDb = require('./pending-fuel-db');
   const stmt = db.prepare(`
     SELECT plate, fuel_volume, fuel_percentage, loc_time, timestamp 
     FROM fuel_history 
-    WHERE plate = 'KROONSTAD2' 
+    WHERE plate = 'FARRAMERE' 
     ORDER BY timestamp DESC 
     LIMIT 10
   `);
