@@ -226,8 +226,8 @@ class EnergyRiteWebSocketClient {
       // Then handle fuel fill status
       const hasFuelFillStatus = this.parseFuelFillStatus(vehicleData.DriverName);
       
-      // Track lowest fuel level before fill status appears
-      if (!hasFuelFillStatus && fuelData.hasFuelData) {
+      // ALWAYS track lowest fuel level (even during fill status)
+      if (fuelData.hasFuelData) {
         this.trackPreFillLowest(actualBranch, fuelData, vehicleData.LocTime);
       }
       
@@ -470,15 +470,23 @@ class EnergyRiteWebSocketClient {
         return;
       }
       
-      // Get fuel data from closest LocTime BEFORE fill status
+      // Get fuel data - prioritize pre-fill watcher (tracks true lowest)
       let openingFuel, openingPercentage;
+      const preFill = pendingFuelDb.getPreFillWatcher(plate);
       const closestFuel = this.findClosestFuelDataBefore(plate, vehicleData.LocTime);
       
       console.log(`🔍 FILL START DEBUG for ${plate}:`);
       console.log(`   Fill status LocTime: ${vehicleData.LocTime}`);
+      console.log(`   Pre-fill lowest: ${preFill ? preFill.lowest_fuel + 'L' : 'NONE'}`);
       console.log(`   Closest fuel found: ${closestFuel ? closestFuel.fuel_probe_1_volume_in_tank + 'L' : 'NONE'}`);
       
-      if (closestFuel && closestFuel.fuel_probe_1_volume_in_tank > 0) {
+      if (preFill && preFill.lowest_fuel > 0) {
+        openingFuel = preFill.lowest_fuel;
+        openingPercentage = preFill.lowest_percentage;
+        console.log(`⛽ FUEL FILL START: ${plate} - Using pre-fill lowest: ${openingFuel}L (tracked since ${preFill.lowest_loc_time})`);
+        // Delete watcher ONLY after successfully using it
+        pendingFuelDb.deletePreFillWatcher(plate);
+      } else if (closestFuel && closestFuel.fuel_probe_1_volume_in_tank > 0) {
         openingFuel = closestFuel.fuel_probe_1_volume_in_tank;
         openingPercentage = closestFuel.fuel_probe_1_level_percentage;
         console.log(`⛽ FUEL FILL START: ${plate} - Using closest fuel before status: ${openingFuel}L`);
