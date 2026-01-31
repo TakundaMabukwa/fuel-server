@@ -588,12 +588,27 @@ class EnergyRiteWebSocketClient {
         
       if (engineSessions && engineSessions.length > 0) {
         const session = engineSessions[0];
+        
+        // Calculate usage BEFORE fill (opening_fuel - pre_fill_fuel)
+        const usageBeforeFill = Math.max(0, session.opening_fuel - watcher.opening_fuel);
+        
+        console.log(`🔧 ENGINE SESSION UPDATE: ${plate}`);
+        console.log(`   Usage before fill: ${session.opening_fuel}L - ${watcher.opening_fuel}L = ${usageBeforeFill.toFixed(1)}L`);
+        console.log(`   Resetting opening fuel: ${session.opening_fuel}L → ${watcher.highest_fuel}L`);
+        
         await supabase
           .from('energy_rite_operating_sessions')
           .update({
+            // Add usage accumulated before fill
+            total_usage: (session.total_usage || 0) + usageBeforeFill,
+            // RESET opening fuel to post-fill level (like C# controller)
+            opening_fuel: watcher.highest_fuel,
+            opening_percentage: watcher.highest_percentage,
+            // Track fill events
             fill_events: (session.fill_events || 0) + 1,
             fill_amount_during_session: (session.fill_amount_during_session || 0) + fillAmount,
-            total_fill: (session.total_fill || 0) + fillAmount
+            total_fill: (session.total_fill || 0) + fillAmount,
+            notes: `${session.notes || ''} | Fill: +${fillAmount.toFixed(1)}L, Usage before fill: ${usageBeforeFill.toFixed(1)}L, Opening reset to ${watcher.highest_fuel}L`
           })
           .eq('id', session.id);
       }
@@ -953,33 +968,27 @@ class EnergyRiteWebSocketClient {
           .limit(1);
           
         if (!existing || existing.length === 0) {
-          const hasFuelData = wsMessage?.fuel_probe_1_level && parseFloat(wsMessage.fuel_probe_1_level) > 0;
+          // C# uses fuel from SAME message for ENGINE ON (line 168: openingFuel=item.FuelProbe1VolumeInTank)
+          const hasFuelData = wsMessage?.fuel_probe_1_volume_in_tank && parseFloat(wsMessage.fuel_probe_1_volume_in_tank) > 0;
           
           if (hasFuelData) {
-            // Create session with fuel data immediately
-            const fuelData = {
-              fuel_probe_1_level: parseFloat(wsMessage.fuel_probe_1_level),
-              fuel_probe_1_level_percentage: parseFloat(wsMessage.fuel_probe_1_level_percentage) || 0,
-              fuel_probe_1_volume_in_tank: parseFloat(wsMessage.fuel_probe_1_volume_in_tank) || 0,
-              fuel_probe_1_temperature: parseFloat(wsMessage.fuel_probe_1_temperature) || 0
-            };
+            const openingFuel = parseFloat(wsMessage.fuel_probe_1_volume_in_tank);
+            const openingPercentage = parseFloat(wsMessage.fuel_probe_1_level_percentage) || 0;
             
             await supabase.from('energy_rite_operating_sessions').insert({
               branch: plate,
               company: 'KFC',
               session_date: currentTime.split('T')[0],
               session_start_time: currentTime,
-              opening_fuel: fuelData.fuel_probe_1_volume_in_tank,
-              opening_percentage: fuelData.fuel_probe_1_level_percentage,
-              opening_volume: fuelData.fuel_probe_1_volume_in_tank,
-              opening_temperature: fuelData.fuel_probe_1_temperature,
+              opening_fuel: openingFuel,
+              opening_percentage: openingPercentage,
               session_status: 'ONGOING',
-              notes: `Engine started. Opening: ${fuelData.fuel_probe_1_level}L (${fuelData.fuel_probe_1_level_percentage}%)`
+              notes: `Engine started. Opening: ${openingFuel}L (${openingPercentage}%)`
             });
             
-            console.log(`✅ Engine session created for ${plate} - Opening: ${fuelData.fuel_probe_1_level}L`);
+            console.log(`✅ ENGINE ON: ${plate} - Opening: ${openingFuel}L (from same message)`);
           } else {
-            // Create session without fuel data, mark as pending
+            // Wait for NEXT fuel data (like ENGINE OFF)
             const { data: newSession } = await supabase.from('energy_rite_operating_sessions').insert({
               branch: plate,
               company: 'KFC',
@@ -987,8 +996,6 @@ class EnergyRiteWebSocketClient {
               session_start_time: currentTime,
               opening_fuel: 0,
               opening_percentage: 0,
-              opening_volume: 0,
-              opening_temperature: 0,
               session_status: 'ONGOING',
               notes: 'Engine started. Waiting for fuel data...'
             }).select().single();
@@ -999,14 +1006,14 @@ class EnergyRiteWebSocketClient {
                 statusLocTime: wsMessage.LocTime,
                 timestamp: Date.now() 
               });
-              console.log(`⏳ Engine session created for ${plate} - Waiting for fuel data`);
+              console.log(`⏳ ENGINE ON: ${plate} - Waiting for NEXT fuel data`);
             }
           }
         } else {
           console.log(`ℹ️ Engine session already exists for ${plate}`);
         }
       } else if (engineStatus === 'OFF') {
-        // Mark session for closure, wait for fuel data
+        // ALWAYS wait for NEXT fuel data (C# controller behavior)
         const { data: sessions } = await supabase
           .from('energy_rite_operating_sessions')
           .select('*')
@@ -1017,21 +1024,14 @@ class EnergyRiteWebSocketClient {
           
         if (sessions && Array.isArray(sessions) && sessions.length > 0) {
           const session = sessions[0];
-          const hasFuelData = wsMessage?.fuel_probe_1_level && parseFloat(wsMessage.fuel_probe_1_level) > 0;
-          
-          if (hasFuelData) {
-            // Complete session immediately with fuel data
-            await this.completeSession(session, currentTime, wsMessage);
-          } else {
-            // Mark session for closure, wait for fuel data
-            this.pendingClosures.set(plate, { 
-              sessionId: session.id, 
-              endTime: currentTime,
-              statusLocTime: wsMessage.LocTime,
-              timestamp: Date.now() 
-            });
-            console.log(`⏳ Engine OFF for ${plate} - Waiting for fuel data to complete session`);
-          }
+          // Mark session for closure, wait for NEXT fuel data after OFF status
+          this.pendingClosures.set(plate, { 
+            sessionId: session.id, 
+            endTime: currentTime,
+            statusLocTime: wsMessage.LocTime,
+            timestamp: Date.now() 
+          });
+          console.log(`⏳ Engine OFF for ${plate} - Waiting for NEXT fuel data to complete session`);
         }
       }
       
@@ -1162,9 +1162,14 @@ class EnergyRiteWebSocketClient {
       const durationMs = endTimeDate.getTime() - startTime.getTime();
       const operatingHours = Math.max(0, durationMs / (1000 * 60 * 60));
       const startingFuel = session.opening_fuel || 0;
-      const fuelConsumed = Math.max(0, startingFuel - closingFuel);
-      const fuelCost = fuelConsumed * 20;
-      const literUsagePerHour = operatingHours > 0 ? fuelConsumed / operatingHours : 0;
+      
+      // Add any accumulated usage from fills during session
+      const accumulatedUsage = session.total_usage || 0;
+      
+      // Calculate final usage: accumulated + (opening - closing)
+      const finalUsage = accumulatedUsage + Math.max(0, startingFuel - closingFuel);
+      const fuelCost = finalUsage * 20;
+      const literUsagePerHour = operatingHours > 0 ? finalUsage / operatingHours : 0;
       
       await supabase.from('energy_rite_operating_sessions')
         .update({
@@ -1174,15 +1179,15 @@ class EnergyRiteWebSocketClient {
           closing_percentage: closingPercentage,
           closing_volume: closingVolume,
           closing_temperature: closingTemperature,
-          total_usage: fuelConsumed,
+          total_usage: finalUsage,
           liter_usage_per_hour: literUsagePerHour,
           cost_for_usage: fuelCost,
           session_status: 'COMPLETED',
-          notes: `Engine stopped. Duration: ${operatingHours.toFixed(2)}h, Opening: ${startingFuel}L, Closing: ${closingFuel}L, Used: ${fuelConsumed.toFixed(1)}L`
+          notes: `Engine stopped. Duration: ${operatingHours.toFixed(2)}h, Opening: ${startingFuel}L, Closing: ${closingFuel}L, Used: ${finalUsage.toFixed(1)}L`
         })
         .eq('id', session.id);
         
-      console.log(`🔴 Engine OFF: ${session.branch} - Used: ${fuelConsumed.toFixed(1)}L in ${operatingHours.toFixed(2)}h`);
+      console.log(`🔴 Engine OFF: ${session.branch} - Used: ${finalUsage.toFixed(1)}L in ${operatingHours.toFixed(2)}h`);
     } catch (error) {
       console.error(`❌ Error completing session:`, error.message);
     }
@@ -1225,25 +1230,23 @@ class EnergyRiteWebSocketClient {
       
       const pending = this.pendingFuelUpdates.get(plate);
       
-      // Find closest fuel data BEFORE ENGINE ON LocTime (use fuel level just before engine started)
-      const closestFuel = this.findClosestFuelDataBefore(plate, pending.statusLocTime);
+      // Find NEXT fuel data AFTER ENGINE ON LocTime (C# uses current/next message fuel)
+      const closestFuel = this.findClosestFuelData(plate, pending.statusLocTime);
       if (!closestFuel) {
-        console.log(`⏳ Waiting for fuel data BEFORE ENGINE ON time for ${plate}`);
+        console.log(`⏳ Waiting for fuel data AFTER ENGINE ON time for ${plate}`);
         return;
       }
       
-      // Update session with closest fuel data BEFORE engine on
+      // Update session with NEXT fuel data after engine on
       await supabase.from('energy_rite_operating_sessions')
         .update({
           opening_fuel: closestFuel.fuel_probe_1_volume_in_tank,
           opening_percentage: closestFuel.fuel_probe_1_level_percentage,
-          opening_volume: closestFuel.fuel_probe_1_volume_in_tank,
-          opening_temperature: closestFuel.fuel_probe_1_temperature,
-          notes: `Engine started. Opening: ${closestFuel.fuel_probe_1_level}L (${closestFuel.fuel_probe_1_level_percentage}%) [before status]`
+          notes: `Engine started. Opening: ${closestFuel.fuel_probe_1_volume_in_tank}L (${closestFuel.fuel_probe_1_level_percentage}%) [next after status]`
         })
         .eq('id', pending.sessionId);
         
-      console.log(`✅ Updated pending session for ${plate} with fuel data: ${closestFuel.fuel_probe_1_level}L`);
+      console.log(`✅ Updated pending session for ${plate} with NEXT fuel data: ${closestFuel.fuel_probe_1_volume_in_tank}L`);
       this.pendingFuelUpdates.delete(plate);
       
     } catch (error) {

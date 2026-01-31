@@ -73,6 +73,7 @@ async function initDatabase() {
         plate TEXT NOT NULL,
         fuel_volume REAL,
         fuel_percentage REAL,
+        fuel_diff REAL DEFAULT 0,
         loc_time TEXT,
         timestamp INTEGER,
         UNIQUE(plate, loc_time)
@@ -287,11 +288,26 @@ function getExpiredFuelFillWatchers() {
 function storeFuelHistory(plate, fuelVolume, fuelPercentage, locTime, timestamp) {
   if (!db) return;
   try {
+    // Get previous reading to calculate diff
+    const prevStmt = db.prepare(`
+      SELECT fuel_volume FROM fuel_history 
+      WHERE plate = ? 
+      ORDER BY timestamp DESC 
+      LIMIT 1
+    `);
+    prevStmt.bind([plate]);
+    let fuelDiff = 0;
+    if (prevStmt.step()) {
+      const prev = prevStmt.getAsObject();
+      fuelDiff = fuelVolume - prev.fuel_volume;
+    }
+    prevStmt.free();
+    
     db.run(`
       INSERT OR REPLACE INTO fuel_history 
-      (plate, fuel_volume, fuel_percentage, loc_time, timestamp)
-      VALUES (?, ?, ?, ?, ?)
-    `, [plate, fuelVolume, fuelPercentage, locTime, timestamp]);
+      (plate, fuel_volume, fuel_percentage, fuel_diff, loc_time, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [plate, fuelVolume, fuelPercentage, fuelDiff, locTime, timestamp]);
     
     // Keep only last 100 entries per plate to prevent bloat
     db.run(`
