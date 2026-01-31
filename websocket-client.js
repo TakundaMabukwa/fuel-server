@@ -860,38 +860,34 @@ class EnergyRiteWebSocketClient {
     const targetTime = new Date(this.convertLocTime(targetLocTime)).getTime();
     const maxWindow = 30 * 60 * 1000; // 30 minutes in LocTime
     
-    // First check in-memory cache
-    const fuelHistory = this.recentFuelData.get(plate);
     let nextFuel = null;
     let minDiff = Infinity;
     
-    if (fuelHistory && fuelHistory.length > 0) {
-      for (const fuelData of fuelHistory) {
-        const diff = fuelData.timestamp - targetTime;
-        // Only consider fuel data AFTER status (diff > 0) AND within 30-min LocTime window
-        // Accept 0 values if device sends them (tank actually empty)
-        if (diff > 0 && diff <= maxWindow && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank >= 0) {
-          minDiff = diff;
-          nextFuel = fuelData;
-        }
+    // First check SQLite (priority for session data)
+    const dbHistory = pendingFuelDb.getFuelHistoryAfter(plate, targetTime, 50);
+    for (const entry of dbHistory) {
+      const diff = entry.timestamp - targetTime;
+      if (diff > 0 && diff <= maxWindow && diff < minDiff && entry.fuel_volume >= 0) {
+        minDiff = diff;
+        nextFuel = {
+          fuel_probe_1_volume_in_tank: entry.fuel_volume,
+          fuel_probe_1_level_percentage: entry.fuel_percentage,
+          locTime: entry.loc_time,
+          timestamp: entry.timestamp
+        };
       }
     }
     
-    // If not found in memory, check SQLite
+    // Fallback to in-memory cache if not found in SQLite
     if (!nextFuel) {
-      const dbHistory = pendingFuelDb.getFuelHistoryAfter(plate, targetTime, 50);
-      for (const entry of dbHistory) {
-        const diff = entry.timestamp - targetTime;
-        // Only consider within 30-min LocTime window
-        // Accept 0 values if device sends them (tank actually empty)
-        if (diff > 0 && diff <= maxWindow && diff < minDiff && entry.fuel_volume >= 0) {
-          minDiff = diff;
-          nextFuel = {
-            fuel_probe_1_volume_in_tank: entry.fuel_volume,
-            fuel_probe_1_level_percentage: entry.fuel_percentage,
-            locTime: entry.loc_time,
-            timestamp: entry.timestamp
-          };
+      const fuelHistory = this.recentFuelData.get(plate);
+      if (fuelHistory && fuelHistory.length > 0) {
+        for (const fuelData of fuelHistory) {
+          const diff = fuelData.timestamp - targetTime;
+          if (diff > 0 && diff <= maxWindow && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank >= 0) {
+            minDiff = diff;
+            nextFuel = fuelData;
+          }
         }
       }
     }
@@ -909,38 +905,34 @@ class EnergyRiteWebSocketClient {
     const targetTime = new Date(this.convertLocTime(targetLocTime)).getTime();
     const maxWindow = 30 * 60 * 1000; // 30 minutes in LocTime
     
-    // First check in-memory cache
-    const fuelHistory = this.recentFuelData.get(plate);
     let closestFuel = null;
     let minDiff = Infinity;
     
-    if (fuelHistory && fuelHistory.length > 0) {
-      for (const fuelData of fuelHistory) {
-        const diff = targetTime - fuelData.timestamp;
-        // Only consider fuel data BEFORE status (diff > 0) AND within 30-min LocTime window
-        // Accept 0 values if device sends them (tank actually empty)
-        if (diff > 0 && diff <= maxWindow && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank >= 0) {
-          minDiff = diff;
-          closestFuel = fuelData;
-        }
+    // First check SQLite (priority for session data)
+    const dbHistory = pendingFuelDb.getFuelHistoryBefore(plate, targetTime, 50);
+    for (const entry of dbHistory) {
+      const diff = targetTime - entry.timestamp;
+      if (diff > 0 && diff <= maxWindow && diff < minDiff && entry.fuel_volume >= 0) {
+        minDiff = diff;
+        closestFuel = {
+          fuel_probe_1_volume_in_tank: entry.fuel_volume,
+          fuel_probe_1_level_percentage: entry.fuel_percentage,
+          locTime: entry.loc_time,
+          timestamp: entry.timestamp
+        };
       }
     }
     
-    // If not found in memory, check SQLite
+    // Fallback to in-memory cache if not found in SQLite
     if (!closestFuel) {
-      const dbHistory = pendingFuelDb.getFuelHistoryBefore(plate, targetTime, 50);
-      for (const entry of dbHistory) {
-        const diff = targetTime - entry.timestamp;
-        // Only consider within 30-min LocTime window
-        // Accept 0 values if device sends them (tank actually empty)
-        if (diff > 0 && diff <= maxWindow && diff < minDiff && entry.fuel_volume >= 0) {
-          minDiff = diff;
-          closestFuel = {
-            fuel_probe_1_volume_in_tank: entry.fuel_volume,
-            fuel_probe_1_level_percentage: entry.fuel_percentage,
-            locTime: entry.loc_time,
-            timestamp: entry.timestamp
-          };
+      const fuelHistory = this.recentFuelData.get(plate);
+      if (fuelHistory && fuelHistory.length > 0) {
+        for (const fuelData of fuelHistory) {
+          const diff = targetTime - fuelData.timestamp;
+          if (diff > 0 && diff <= maxWindow && diff < minDiff && fuelData.fuel_probe_1_volume_in_tank >= 0) {
+            minDiff = diff;
+            closestFuel = fuelData;
+          }
         }
       }
     }
@@ -975,6 +967,30 @@ class EnergyRiteWebSocketClient {
             const openingFuel = parseFloat(wsMessage.fuel_probe_1_volume_in_tank);
             const openingPercentage = parseFloat(wsMessage.fuel_probe_1_level_percentage) || 0;
             
+            // Validate: if fuel > 0 but percentage = 0, data is incomplete - wait for next message
+            if (openingFuel > 10 && openingPercentage === 0) {
+              console.log(`⚠️ ENGINE ON: ${plate} - Incomplete fuel data (${openingFuel}L but 0%), waiting for complete data`);
+              const { data: newSession } = await supabase.from('energy_rite_operating_sessions').insert({
+                branch: plate,
+                company: 'KFC',
+                session_date: currentTime.split('T')[0],
+                session_start_time: currentTime,
+                opening_fuel: 0,
+                opening_percentage: 0,
+                session_status: 'ONGOING',
+                notes: 'Engine started. Waiting for complete fuel data...'
+              }).select().single();
+              
+              if (newSession) {
+                this.pendingFuelUpdates.set(plate, { 
+                  sessionId: newSession.id, 
+                  statusLocTime: wsMessage.LocTime,
+                  timestamp: Date.now() 
+                });
+              }
+              return;
+            }
+            
             await supabase.from('energy_rite_operating_sessions').insert({
               branch: plate,
               company: 'KFC',
@@ -986,7 +1002,7 @@ class EnergyRiteWebSocketClient {
               notes: `Engine started. Opening: ${openingFuel}L (${openingPercentage}%)`
             });
             
-            console.log(`✅ ENGINE ON: ${plate} - Opening: ${openingFuel}L (from same message)`);
+            console.log(`✅ ENGINE ON: ${plate} - Opening: ${openingFuel}L (${openingPercentage}%) (from same message)`);
           } else {
             // Wait for NEXT fuel data (like ENGINE OFF)
             const { data: newSession } = await supabase.from('energy_rite_operating_sessions').insert({
@@ -1230,23 +1246,25 @@ class EnergyRiteWebSocketClient {
       
       const pending = this.pendingFuelUpdates.get(plate);
       
-      // Find NEXT fuel data AFTER ENGINE ON LocTime (C# uses current/next message fuel)
-      const closestFuel = this.findClosestFuelData(plate, pending.statusLocTime);
+      // C# uses fuel from SAME message as ENGINE ON (line 168)
+      // Find fuel BEFORE the ON status (closest to same message)
+      const closestFuel = this.findClosestFuelDataBefore(plate, pending.statusLocTime);
+      
       if (!closestFuel) {
-        console.log(`⏳ Waiting for fuel data AFTER ENGINE ON time for ${plate}`);
+        console.log(`⏳ Waiting for fuel data BEFORE ENGINE ON time for ${plate}`);
         return;
       }
       
-      // Update session with NEXT fuel data after engine on
+      // Update session with fuel BEFORE engine on
       await supabase.from('energy_rite_operating_sessions')
         .update({
           opening_fuel: closestFuel.fuel_probe_1_volume_in_tank,
           opening_percentage: closestFuel.fuel_probe_1_level_percentage,
-          notes: `Engine started. Opening: ${closestFuel.fuel_probe_1_volume_in_tank}L (${closestFuel.fuel_probe_1_level_percentage}%) [next after status]`
+          notes: `Engine started. Opening: ${closestFuel.fuel_probe_1_volume_in_tank}L (${closestFuel.fuel_probe_1_level_percentage}%) [before ON status]`
         })
         .eq('id', pending.sessionId);
         
-      console.log(`✅ Updated pending session for ${plate} with NEXT fuel data: ${closestFuel.fuel_probe_1_volume_in_tank}L`);
+      console.log(`✅ Updated pending session for ${plate} with fuel BEFORE ON: ${closestFuel.fuel_probe_1_volume_in_tank}L`);
       this.pendingFuelUpdates.delete(plate);
       
     } catch (error) {
