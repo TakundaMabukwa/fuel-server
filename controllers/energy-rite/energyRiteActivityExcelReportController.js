@@ -42,10 +42,15 @@ function addReportHeader(worksheet, activityData, costCode, siteId) {
         buffer: logoBuffer,
         extension: 'png'
       });
-      // Center logo inside merged A1:K6 region with symmetric margins
+      // A1:K6 => 11 columns total. Use 60% width with 20% margins each side.
+      const totalCols = 11;
+      const sideMarginCols = totalCols * 0.20; // 2.2
+      const logoWidthCols = totalCols * 0.60;  // 6.6
+      const startCol = sideMarginCols;
+      const endCol = startCol + logoWidthCols;
       worksheet.addImage(imageId, {
-        tl: { col: 1.0, row: 0.2 },
-        br: { col: 10.0, row: 5.8 }
+        tl: { col: startCol, row: 0.2 },
+        br: { col: endCol, row: 5.8 }
       });
     }
   } catch (error) {

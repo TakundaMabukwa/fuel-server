@@ -448,9 +448,12 @@ class EnergyRiteExcelReportGenerator {
           buffer: logoBuffer,
           extension: 'png'
         });
-        // Center logo inside merged A1:L6 region with symmetric margins
-        const startCol = 1.5;
-        const endCol = 10.5;
+        // A1:L6 => 12 columns total. Use 60% width with 20% margins each side.
+        const totalCols = 12;
+        const sideMarginCols = totalCols * 0.20; // 2.4
+        const logoWidthCols = totalCols * 0.60;  // 7.2
+        const startCol = sideMarginCols;
+        const endCol = startCol + logoWidthCols;
         worksheet.addImage(imageId, {
           tl: { col: startCol, row: 0.2 },
           br: { col: endCol, row: 5.8 }
@@ -746,7 +749,7 @@ class EnergyRiteExcelReportGenerator {
     // Style breakdown row
     breakdownRow.eachCell((cell, colNumber) => {
       if (colNumber <= 3) {
-        cell.font = { italic: true, size: 10, color: { argb: 'FF666666' } };
+        cell.font = { bold: true, size: 11, color: { argb: 'FF000000' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8F8F8' } };
         cell.alignment = { horizontal: colNumber === 2 ? 'left' : 'center', vertical: 'middle' };
         cell.border = {
