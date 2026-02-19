@@ -527,6 +527,23 @@ class EnergyRiteReportsController {
     try {
       const { date, cost_code, site_id } = req.query;
       const targetDate = date || new Date().toISOString().split('T')[0];
+      const saTimeZone = 'Africa/Johannesburg';
+      const toSaUtcIso = (dateStr, hour = 0, minute = 0, second = 0) =>
+        new Date(
+          `${dateStr}T${hour.toString().padStart(2, '0')}:${minute
+            .toString()
+            .padStart(2, '0')}:${second.toString().padStart(2, '0')}+02:00`
+        ).toISOString();
+      const getSaHour = (dateValue) => {
+        const hourText = new Intl.DateTimeFormat('en-GB', {
+          timeZone: saTimeZone,
+          hour: '2-digit',
+          hourCycle: 'h23'
+        }).format(new Date(dateValue));
+        return parseInt(hourText, 10);
+      };
+      const dayStartUtc = toSaUtcIso(targetDate, 0, 0, 0);
+      const nextDayStartUtc = new Date(new Date(dayStartUtc).getTime() + (24 * 60 * 60 * 1000)).toISOString();
       
       // Get operating sessions for the selected date
       let sessionsQuery = supabase
@@ -585,8 +602,8 @@ class EnergyRiteReportsController {
       const { data: fuelData, error: fuelError } = await supabase
         .from('energy_rite_fuel_data')
         .select('plate, fuel_probe_1_level, drivername, created_at')
-        .gte('created_at', targetDate)
-        .lt('created_at', new Date(Date.parse(targetDate) + 24 * 60 * 60 * 1000).toISOString())
+        .gte('created_at', dayStartUtc)
+        .lt('created_at', nextDayStartUtc)
         .order('plate')
         .order('created_at');
         
@@ -750,7 +767,7 @@ class EnergyRiteReportsController {
           };
         }
         
-        const hour = new Date(record.created_at).getHours();
+        const hour = getSaHour(record.created_at);
         const fuelLevel = parseFloat(record.fuel_probe_1_level || 0);
         
         fuelSnapshots[record.plate].fuel_readings.push({
@@ -778,7 +795,9 @@ class EnergyRiteReportsController {
       
       const fuelReadings = {};
       for (const [key, time] of Object.entries(keyTimes)) {
-        const targetTime = new Date(targetDate + 'T' + time.hour.toString().padStart(2, '0') + ':00:00');
+        const targetTime = new Date(
+          `${targetDate}T${time.hour.toString().padStart(2, '0')}:00:00+02:00`
+        );
         const startWindow = new Date(targetTime.getTime() - 30 * 60 * 1000); // 30 min before
         const endWindow = new Date(targetTime.getTime() + 30 * 60 * 1000); // 30 min after
         
@@ -828,10 +847,10 @@ class EnergyRiteReportsController {
         };
         
         const targetTimes = {
-          start_of_day: new Date(targetDate + 'T06:00:00'),
-          midday: new Date(targetDate + 'T12:00:00'),
-          afternoon_end: new Date(targetDate + 'T17:00:00'),
-          end_of_day: new Date(targetDate + 'T23:00:00')
+          start_of_day: new Date(`${targetDate}T06:00:00+02:00`),
+          midday: new Date(`${targetDate}T12:00:00+02:00`),
+          afternoon_end: new Date(`${targetDate}T17:00:00+02:00`),
+          end_of_day: new Date(`${targetDate}T23:00:00+02:00`)
         };
         
         const startReading = getClosestReading(siteReadings.start_of_day, targetTimes.start_of_day);
@@ -973,7 +992,7 @@ class EnergyRiteReportsController {
       
       // Process activity snapshots by time periods
       const timePeriods = {
-        morning: { start: 7, end: 12, name: 'Morning (7AM-12PM)', data: null, fuel_consumption: fuelConsumption.morning },
+        morning: { start: 6, end: 12, name: 'Morning (6AM-12PM)', data: null, fuel_consumption: fuelConsumption.morning },
         afternoon: { start: 12, end: 17, name: 'Afternoon (12PM-5PM)', data: null, fuel_consumption: fuelConsumption.afternoon },
         evening: { start: 17, end: 24, name: 'Evening (5PM-12AM)', data: null, fuel_consumption: fuelConsumption.evening }
       };

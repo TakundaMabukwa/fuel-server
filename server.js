@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const EnergyRiteWebSocketClient = require('./websocket-client');
 
 const app = express();
@@ -8,6 +9,8 @@ const app = express();
 // Middleware
 app.use(express.json());
 app.use(cors());
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use('/assets', express.static(__dirname));
 
 // Routes
 app.use('/api/energy-rite', require('./routes/energy-rite-data'));

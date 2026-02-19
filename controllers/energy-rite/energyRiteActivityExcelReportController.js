@@ -31,7 +31,9 @@ function addReportHeader(worksheet, activityData, costCode, siteId) {
   // Try to add logo image
   const fs = require('fs');
   const path = require('path');
-  const logoPath = path.join(__dirname, '../../assets/logo.png');
+  const preferredLogoPath = path.join(__dirname, '../../energyease_logo_green_orange_1m.png');
+  const fallbackLogoPath = path.join(__dirname, '../../assets/logo.png');
+  const logoPath = fs.existsSync(preferredLogoPath) ? preferredLogoPath : fallbackLogoPath;
   
   try {
     if (fs.existsSync(logoPath)) {
@@ -40,9 +42,10 @@ function addReportHeader(worksheet, activityData, costCode, siteId) {
         buffer: logoBuffer,
         extension: 'png'
       });
+      // Center logo inside merged A1:K6 region with symmetric margins
       worksheet.addImage(imageId, {
-        tl: { col: 0.1, row: 0.1 },
-        br: { col: 5.9, row: 5.9 }
+        tl: { col: 1.0, row: 0.2 },
+        br: { col: 10.0, row: 5.8 }
       });
     }
   } catch (error) {
@@ -50,7 +53,7 @@ function addReportHeader(worksheet, activityData, costCode, siteId) {
   }
   
   logoCell.value = '';
-  logoCell.alignment = { horizontal: 'left', vertical: 'middle' };
+  logoCell.alignment = { horizontal: 'center', vertical: 'middle' };
   
   // Title with professional styling
   worksheet.mergeCells('A7:K7');
