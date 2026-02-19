@@ -408,7 +408,7 @@ class EnergyRiteExcelReportGenerator {
     worksheet.columns = [
       { width: 5 },   // A: Expand button column
       { width: 22 },  // B: Site
-      { width: 14 },  // C: Date  
+      { width: 30 },  // C: Date / breakdown text
       { width: 28 },  // D: Operating Hours (increased from 16)
       { width: 16 },  // E: Opening Percentage
       { width: 14 },  // F: Opening Fuel
