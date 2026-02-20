@@ -521,6 +521,13 @@ class EnhancedExecutiveDashboardController {
  */
 async function detectContinuousOperations(targetDate, costCode = null, costCodes = null) {
   try {
+    const SPECIAL_COST_CODE_ROOT = 'KFC-0001-0001-0003';
+    const DEFAULT_CONTINUOUS_THRESHOLD_HOURS = 12;
+    const SPECIAL_CONTINUOUS_THRESHOLD_HOURS = 4;
+    const isCostCodeInHierarchy = (rootCostCode, candidateCostCode) =>
+      Boolean(candidateCostCode) &&
+      (candidateCostCode === rootCostCode || candidateCostCode.startsWith(`${rootCostCode}-`));
+
     // Month-to-date: start from 1st of current month
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -536,7 +543,7 @@ async function detectContinuousOperations(targetDate, costCode = null, costCodes
       .gte('session_date', startDateStr)
       .lte('session_date', endDate)
       .eq('session_status', 'COMPLETED')
-      .gt('operating_hours', 12);
+      .gt('operating_hours', SPECIAL_CONTINUOUS_THRESHOLD_HOURS);
       
     // Apply cost code filtering
     if (costCode || costCodes) {
@@ -558,9 +565,22 @@ async function detectContinuousOperations(targetDate, costCode = null, costCodes
     
     const { data: sessions, error } = await sessionsQuery;
     if (error) throw error;
-    
+
+    const filteredSessions = (sessions || []).filter(session => {
+      const hours = parseFloat(session.operating_hours || 0);
+      const threshold = isCostCodeInHierarchy(SPECIAL_COST_CODE_ROOT, session.cost_code)
+        ? SPECIAL_CONTINUOUS_THRESHOLD_HOURS
+        : DEFAULT_CONTINUOUS_THRESHOLD_HOURS;
+      return hours > threshold;
+    });
+
     // Return individual sessions, not grouped
-    const continuousOperationsSites = sessions.map(session => ({
+    const continuousOperationsSites = filteredSessions.map(session => {
+      const appliedThresholdHours = isCostCodeInHierarchy(SPECIAL_COST_CODE_ROOT, session.cost_code)
+        ? SPECIAL_CONTINUOUS_THRESHOLD_HOURS
+        : DEFAULT_CONTINUOUS_THRESHOLD_HOURS;
+
+      return {
       site: session.branch,
       cost_code: session.cost_code,
       session_date: session.session_date,
@@ -568,8 +588,10 @@ async function detectContinuousOperations(targetDate, costCode = null, costCodes
       fuel_usage: Math.round(parseFloat(session.total_usage || 0) * 100) / 100,
       max_continuous_streak: Math.round(parseFloat(session.operating_hours) * 100) / 100,
       sessions_today: 1,
-      pattern: 'Long continuous run'
-    })).sort((a, b) => b.total_hours - a.total_hours);
+      pattern: 'Long continuous run',
+      threshold_hours: appliedThresholdHours
+    };
+    }).sort((a, b) => b.total_hours - a.total_hours);
     
     return continuousOperationsSites;
     

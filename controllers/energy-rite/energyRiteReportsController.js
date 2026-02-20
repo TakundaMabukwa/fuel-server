@@ -742,6 +742,26 @@ class EnergyRiteReportsController {
         if (a.branch !== b.branch) return a.branch.localeCompare(b.branch);
         return new Date(a.start_time) - new Date(b.start_time);
       });
+
+      const validStartTimes = activitySummary
+        .map(s => s.start_time)
+        .filter(Boolean)
+        .map(t => new Date(t).getTime())
+        .filter(t => !Number.isNaN(t));
+
+      const validEndTimes = activitySummary
+        .map(s => s.end_time)
+        .filter(Boolean)
+        .map(t => new Date(t).getTime())
+        .filter(t => !Number.isNaN(t));
+
+      const reportStartTime = validStartTimes.length > 0
+        ? new Date(Math.min(...validStartTimes)).toISOString()
+        : null;
+
+      const reportEndTime = validEndTimes.length > 0
+        ? new Date(Math.max(...validEndTimes)).toISOString()
+        : null;
       
       // Calculate summary statistics (using original sessionsData for totals)
       const summary = {
@@ -1032,6 +1052,8 @@ class EnergyRiteReportsController {
         success: true,
         data: {
           date: targetDate,
+          start_time: reportStartTime,
+          end_time: reportEndTime,
           cost_code: cost_code || 'All',
           site_id: site_id,
           summary: summary,
